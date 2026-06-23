@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
+import { DateTime } from 'luxon';
 
 interface Professional {
     id: number;
@@ -37,7 +38,6 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
     const [currentUserRole, setCurrentUserRole] = useState<'PHARMACIST' | 'DOCTOR'>('PHARMACIST');
     const [staffUsername, setStaffUsername] = useState('System');
     
-    // Core Form State
     const [modalProfessionalId, setModalProfessionalId] = useState(selectedProfessionalId);
     const [clientName, setClientName] = useState('');
     const [clientPhone, setClientPhone] = useState('');
@@ -45,20 +45,19 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
 
-    // UI Panels & Selection
     const [activePanel, setActivePanel] = useState<'NONE' | 'DATE' | 'TIME'>('NONE');
-    const [confirmedDate, setConfirmedDate] = useState<Date | null>(null);
+    const [confirmedDate, setConfirmedDate] = useState<DateTime | null>(null);
     const [confirmedTime, setConfirmedTime] = useState<string | null>(null);
-    const [tempDate, setTempDate] = useState<Date | null>(null);
+    const [tempDate, setTempDate] = useState<DateTime | null>(null);
     const [tempTime, setTempTime] = useState<string | null>(null);
 
-    // Optimized Memory State
     const [monthAvailabilities, setMonthAvailabilities] = useState<Availability[]>([]);
     const [monthAppointments, setMonthAppointments] = useState<Appointment[]>([]);
     const [availableSlots, setAvailableSlots] = useState<{ time: string; isBooked: boolean }[]>([]);
-    const [currentMonth, setCurrentMonth] = useState(new Date());
+    
+    // Invariant anchors: Current time initialized strictly under Malta zone rules
+    const [currentMonth, setCurrentMonth] = useState<DateTime>(DateTime.local({ zone: 'Europe/Malta' }));
 
-    // 1. Initialization and RBAC Check
     useEffect(() => {
         if (!isOpen) return;
         
@@ -66,10 +65,13 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
         setActivePanel('NONE');
         setConfirmedDate(null);
         setConfirmedTime(null);
+        setTempDate(null);
+        setTempTime(null);
         setClientName('');
         setClientPhone('');
         setErrorMessage('');
         setRoomNumber('1');
+        setCurrentMonth(DateTime.local({ zone: 'Europe/Malta' }));
 
         const fetchUser = async () => {
             const { data: { user } } = await supabase.auth.getUser();
@@ -88,16 +90,20 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
         fetchUser();
     }, [isOpen, selectedProfessionalId, professionals]);
 
-    // 2. Fetch Base Month Data
     useEffect(() => {
         if (!isOpen || !modalProfessionalId) return;
 
         const fetchMonthData = async () => {
+            const startOfMonth = currentMonth.startOf('month').toUTC().toISO();
+            const endOfMonth = currentMonth.endOf('month').toUTC().toISO();
+
+            if (!startOfMonth || !endOfMonth) return;
+
             const [availRes, apptRes] = await Promise.all([
                 supabase.from('availabilities').select('*').eq('professional_id', modalProfessionalId),
                 supabase.from('appointments').select('*').eq('professional_id', modalProfessionalId)
-                    .gte('start_time_utc', new Date(currentMonth.getFullYear(), currentMonth.getMonth(), 1).toISOString())
-                    .lte('start_time_utc', new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 0, 23, 59, 59).toISOString())
+                    .gte('start_time_utc', startOfMonth)
+                    .lte('start_time_utc', endOfMonth)
             ]);
             
             setMonthAvailabilities(availRes.data || []);
@@ -106,38 +112,35 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
         fetchMonthData();
     }, [modalProfessionalId, currentMonth, isOpen]);
 
-    // 3. Slot Generation Engine
     useEffect(() => {
         if (!confirmedDate || !modalProfessionalId) return;
         
-        const dayOfWeek = confirmedDate.getDay();
-        const offset = confirmedDate.getTimezoneOffset();
-        const localDate = new Date(confirmedDate.getTime() - (offset * 60 * 1000));
-        const selectedDateString = localDate.toISOString().split('T')[0];
+        // Convert Luxon Sunday(7) to PostgreSQL DOW(0)
+        const sqlDayOfWeek = confirmedDate.weekday === 7 ? 0 : confirmedDate.weekday;
+        const selectedDateString = confirmedDate.toISODate(); 
         
-        const dayAvails = monthAvailabilities.filter(a => a.day_of_week === dayOfWeek);
+        const dayAvails = monthAvailabilities.filter(a => a.day_of_week === sqlDayOfWeek);
         const currentProfessional = professionals.find(p => p.id.toString() === modalProfessionalId);
         const duration = currentProfessional ? currentProfessional.default_duration_minutes : 15;
 
         const generatedSlots: { time: string; isBooked: boolean }[] = [];
 
         dayAvails.forEach(avail => {
-            let currentSlot = new Date(`${selectedDateString}T${avail.start_time}`);
-            const endTime = new Date(`${selectedDateString}T${avail.end_time}`);
+            // Build invariant starting timeline markers for iteration loops
+            let currentSlot = DateTime.fromISO(`${selectedDateString}T${avail.start_time}`, { zone: 'Europe/Malta' });
+            const endTime = DateTime.fromISO(`${selectedDateString}T${avail.end_time}`, { zone: 'Europe/Malta' });
 
             while (currentSlot < endTime) {
-                const timeString = currentSlot.toTimeString().substring(0, 5);
+                const timeString = currentSlot.toFormat('HH:mm');
                 const isBooked = monthAppointments.some(appt => {
-                    const apptDate = new Date(appt.start_time_utc);
-                    const apptOffset = apptDate.getTimezoneOffset();
-                    const localApptDate = new Date(apptDate.getTime() - (apptOffset * 60 * 1000));
-                    return localApptDate.toISOString().split('T')[0] === selectedDateString &&
-                           apptDate.toTimeString().substring(0, 5) === timeString &&
+                    const apptDate = DateTime.fromISO(appt.start_time_utc, { zone: 'Europe/Malta' });
+                    return apptDate.toISODate() === selectedDateString &&
+                           apptDate.toFormat('HH:mm') === timeString &&
                            appt.status !== 'cancelled';
                 });
 
                 generatedSlots.push({ time: timeString, isBooked });
-                currentSlot = new Date(currentSlot.getTime() + duration * 60000);
+                currentSlot = currentSlot.plus({ minutes: duration });
             }
         });
 
@@ -147,7 +150,6 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
 
     if (!isOpen) return null;
 
-    // Strict Phone Sanitization
     const handlePhoneInput = (e: React.ChangeEvent<HTMLInputElement>) => {
         const onlyNumbers = e.target.value.replace(/\D/g, '');
         if (onlyNumbers.length <= 9) setClientPhone(onlyNumbers);
@@ -167,26 +169,34 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
         const currentProfessional = professionals.find(p => p.id.toString() === modalProfessionalId);
         const durationMinutes = currentProfessional ? currentProfessional.default_duration_minutes : 15;
 
-        const offset = confirmedDate.getTimezoneOffset();
-        const localDate = new Date(confirmedDate.getTime() - (offset * 60 * 1000));
-        const dateString = localDate.toISOString().split('T')[0];
-        
-        const startDateTime = new Date(`${dateString}T${confirmedTime}`);
-        const endDateTime = new Date(startDateTime.getTime() + durationMinutes * 60000);
+        // Invariant absolute timestamps generation mapping Malta timezone metrics
+        const dateString = confirmedDate.toISODate();
+        const startDateTime = DateTime.fromISO(`${dateString}T${confirmedTime}`, { zone: 'Europe/Malta' });
+        const endDateTime = startDateTime.plus({ minutes: durationMinutes });
+
+        // Fail-Fast Temporal Firewall
+        if (startDateTime < DateTime.local({ zone: 'Europe/Malta' })) {
+            setErrorMessage('Validation Error: Cannot book an appointment in the past.');
+            setIsSubmitting(false);
+            return;
+        }
 
         try {
-            const { error: insertError } = await supabase.from('appointments').insert({
-                professional_id: parseInt(modalProfessionalId),
-                room_number: parseInt(roomNumber),
-                client_name: clientName.trim(),
-                client_phone: clientPhone,
-                start_time_utc: startDateTime.toISOString(),
-                end_time_utc: endDateTime.toISOString(),
-                status: 'confirmed',
-                created_by_username: staffUsername
+            // Invoke Stored Procedure RPC to delegate atomic concurrency verification to Postgres
+            const { error: rpcError } = await supabase.rpc('book_appointment_secure', {
+                p_professional_id: parseInt(modalProfessionalId),
+                p_room_number: parseInt(roomNumber),
+                p_client_name: clientName.trim(),
+                p_client_phone: clientPhone,
+                p_start_time_utc: startDateTime.toUTC().toISO(),
+                p_end_time_utc: endDateTime.toUTC().toISO(),
+                p_staff_username: staffUsername
             });
 
-            if (insertError) throw insertError;
+            if (rpcError) {
+                // Intercept and display controlled error messages thrown by the backend RAISE EXCEPTION
+                throw new Error(rpcError.message);
+            }
             
             onSuccess();
             onClose();
@@ -197,42 +207,36 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
         }
     };
 
-    // Calendar Generation Logic
-    const getDayColorClass = (dateObj: Date, isSelected: boolean) => {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+    const getDayColorClass = (dateObj: DateTime, isSelected: boolean) => {
+        const today = DateTime.local({ zone: 'Europe/Malta' }).startOf('day');
         
         if (isSelected) return 'bg-blue-600 text-white shadow-md ring-2 ring-blue-300';
         if (dateObj < today) return 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-60';
 
-        const dayAvails = monthAvailabilities.filter(a => a.day_of_week === dateObj.getDay());
+        const sqlDayOfWeek = dateObj.weekday === 7 ? 0 : dateObj.weekday;
+        const dayAvails = monthAvailabilities.filter(a => a.day_of_week === sqlDayOfWeek);
         if (dayAvails.length === 0) return 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-60';
 
         let totalSlots = 0;
         let bookedSlots = 0;
         const currentProfessional = professionals.find(p => p.id.toString() === modalProfessionalId);
         const duration = currentProfessional ? currentProfessional.default_duration_minutes : 15;
-        
-        const offset = dateObj.getTimezoneOffset();
-        const localDate = new Date(dateObj.getTime() - (offset * 60 * 1000));
-        const selectedDateString = localDate.toISOString().split('T')[0];
+        const selectedDateString = dateObj.toISODate();
 
         dayAvails.forEach(avail => {
-            let currentSlot = new Date(`${selectedDateString}T${avail.start_time}`);
-            const endTime = new Date(`${selectedDateString}T${avail.end_time}`);
+            let currentSlot = DateTime.fromISO(`${selectedDateString}T${avail.start_time}`, { zone: 'Europe/Malta' });
+            const endTime = DateTime.fromISO(`${selectedDateString}T${avail.end_time}`, { zone: 'Europe/Malta' });
             while (currentSlot < endTime) {
                 totalSlots++;
-                const timeString = currentSlot.toTimeString().substring(0, 5);
+                const timeString = currentSlot.toFormat('HH:mm');
                 const isBooked = monthAppointments.some(appt => {
-                    const apptDate = new Date(appt.start_time_utc);
-                    const apptOffset = apptDate.getTimezoneOffset();
-                    const localApptDate = new Date(apptDate.getTime() - (apptOffset * 60 * 1000));
-                    return localApptDate.toISOString().split('T')[0] === selectedDateString &&
-                           apptDate.toTimeString().substring(0, 5) === timeString &&
+                    const apptDate = DateTime.fromISO(appt.start_time_utc, { zone: 'Europe/Malta' });
+                    return apptDate.toISODate() === selectedDateString &&
+                           apptDate.toFormat('HH:mm') === timeString &&
                            appt.status !== 'cancelled';
                 });
                 if (isBooked) bookedSlots++;
-                currentSlot = new Date(currentSlot.getTime() + duration * 60000);
+                currentSlot = currentSlot.plus({ minutes: duration });
             }
         });
 
@@ -243,11 +247,9 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
     };
 
     const renderCalendarInner = () => {
-        const year = currentMonth.getFullYear();
-        const month = currentMonth.getMonth();
-        const daysInMonth = new Date(year, month + 1, 0).getDate();
-        const jsDay = new Date(year, month, 1).getDay();
-        const firstDayIndex = (jsDay + 6) % 7; 
+        const daysInMonth = currentMonth.daysInMonth ?? 30;
+        // Shift indexing so Monday tracks as position 0
+        const firstDayIndex = (currentMonth.startOf('month').weekday + 6) % 7;
         const days = [];
 
         for (let i = 0; i < firstDayIndex; i++) {
@@ -255,15 +257,16 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
         }
 
         for (let i = 1; i <= daysInMonth; i++) {
-            const dateObj = new Date(year, month, i);
-            const isSelected = tempDate?.toDateString() === dateObj.toDateString();
-            const today = new Date();
-            today.setHours(0, 0, 0, 0);
-            const isDisabled = (dateObj < today) || !monthAvailabilities.some(a => a.day_of_week === dateObj.getDay());
+            const dateObj = currentMonth.set({ day: i });
+            const isSelected = tempDate?.toISODate() === dateObj.toISODate();
+            const today = DateTime.local({ zone: 'Europe/Malta' }).startOf('day');
+            const sqlDayOfWeek = dateObj.weekday === 7 ? 0 : dateObj.weekday;
+            const isDisabled = (dateObj < today) || !monthAvailabilities.some(a => a.day_of_week === sqlDayOfWeek);
 
             days.push(
                 <button
                     key={i}
+                    type="button"
                     onClick={() => !isDisabled && setTempDate(dateObj)}
                     disabled={isDisabled}
                     className={`h-9 w-full rounded-md text-sm transition-colors ${getDayColorClass(dateObj, isSelected)}`}
@@ -276,9 +279,9 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
         return (
             <>
                 <div className="flex items-center justify-between mb-4 px-2 shrink-0">
-                    <button onClick={() => setCurrentMonth(new Date(year, month - 1, 1))} className="p-1 hover:bg-gray-100 rounded text-gray-600">←</button>
-                    <span className="font-semibold text-gray-800">{currentMonth.toLocaleString('en-US', { month: 'long', year: 'numeric' })}</span>
-                    <button onClick={() => setCurrentMonth(new Date(year, month + 1, 1))} className="p-1 hover:bg-gray-100 rounded text-gray-600">→</button>
+                    <button type="button" onClick={() => setCurrentMonth(currentMonth.minus({ months: 1 }))} className="p-1 hover:bg-gray-100 rounded text-gray-600">←</button>
+                    <span className="font-semibold text-gray-800">{currentMonth.toFormat('MMMM yyyy')}</span>
+                    <button type="button" onClick={() => setCurrentMonth(currentMonth.plus({ months: 1 }))} className="p-1 hover:bg-gray-100 rounded text-gray-600">→</button>
                 </div>
                 
                 <div className="grid grid-cols-7 gap-1 text-center mb-2 text-xs font-bold text-gray-400 shrink-0">
@@ -302,7 +305,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-sm">
             <div className="flex w-full max-w-4xl h-fit max-h-[90vh] bg-white rounded-2xl shadow-2xl overflow-hidden border border-gray-200">
                 
-                {/* Left Panel: Primary Form */}
+                {/* Left Panel */}
                 <div className="w-1/2 p-6 border-r border-gray-100 bg-gray-50/30 flex flex-col">
                     <h2 className="text-2xl font-bold text-gray-800 mb-4 shrink-0">Book Appointment</h2>
                     
@@ -363,7 +366,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                                     onClick={() => setActivePanel('DATE')}
                                     className={`w-full text-left rounded-lg border p-2 shadow-sm transition-colors ${activePanel === 'DATE' ? 'border-blue-500 ring-2 ring-blue-100 bg-blue-50/50' : 'border-gray-300 bg-white hover:bg-gray-50'}`}
                                 >
-                                    {confirmedDate ? confirmedDate.toLocaleDateString('en-GB') : <span className="text-gray-400">Select day...</span>}
+                                    {confirmedDate ? confirmedDate.toFormat('dd/MM/yyyy') : <span className="text-gray-400">Select day...</span>}
                                 </button>
                             </div>
                             <div>
@@ -393,7 +396,6 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                             </div>
                         </div>
 
-                        {/* Left Panel Footer Pinned */}
                         <div className="mt-auto pt-4 border-t border-gray-200 flex justify-between items-center shrink-0">
                             <button type="button" onClick={onClose} disabled={isSubmitting} className="text-sm font-semibold text-gray-500 hover:text-gray-800 transition">
                                 Cancel & Close
@@ -405,9 +407,8 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                     </form>
                 </div>
 
-                {/* Right Panel: Shared Flex Context */}
+                {/* Right Panel */}
                 <div className="w-1/2 p-6 bg-white flex flex-col">
-                    
                     {activePanel === 'NONE' && (
                         <div className="m-auto flex flex-col items-center justify-center text-gray-400">
                             <svg className="w-16 h-16 mb-4 text-gray-200" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -420,15 +421,11 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                     {activePanel === 'DATE' && (
                         <>
                             <h3 className="text-lg font-bold text-gray-800 mb-6 shrink-0">Select Appointment Date</h3>
-                            
                             {renderCalendarInner()}
-
-                            {/* Right Panel Footer Pinned */}
                             <div className="mt-auto pt-4 border-t border-gray-200 flex justify-end shrink-0">
                                 <button
-                                    onClick={() => {
-                                        if (tempDate) { setConfirmedDate(tempDate); setConfirmedTime(null); setActivePanel('NONE'); }
-                                    }}
+                                    type="button"
+                                    onClick={() => { if (tempDate) { setConfirmedDate(tempDate); setConfirmedTime(null); setActivePanel('NONE'); } }}
                                     disabled={!tempDate}
                                     className="bg-blue-600 text-white px-6 py-2.5 rounded-lg font-bold text-sm disabled:opacity-50 disabled:shadow-none shadow-md hover:bg-blue-700 transition-all"
                                 >
@@ -442,7 +439,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                         <>
                             <div className="shrink-0">
                                 <h3 className="text-lg font-bold text-gray-800 mb-1">Select Time Slot</h3>
-                                <p className="text-sm text-gray-500 mb-4 pb-4 border-b border-gray-100">Availability for {confirmedDate?.toLocaleDateString('en-GB')}</p>
+                                <p className="text-sm text-gray-500 mb-4 pb-4 border-b border-gray-100">Availability for {confirmedDate?.toFormat('dd/MM/yyyy')}</p>
                             </div>
                             
                             {availableSlots.length === 0 ? (
@@ -455,6 +452,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                                         {availableSlots.map((slot, idx) => (
                                             <button
                                                 key={idx}
+                                                type="button"
                                                 disabled={slot.isBooked}
                                                 onClick={() => setTempTime(slot.time)}
                                                 className={`p-3 rounded-lg border-2 text-sm font-bold transition-all ${
@@ -472,9 +470,9 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                                 </div>
                             )}
 
-                            {/* Right Panel Footer Pinned */}
                             <div className="mt-auto pt-4 border-t border-gray-200 flex justify-end shrink-0">
                                 <button
+                                    type="button"
                                     onClick={() => { if (tempTime) { setConfirmedTime(tempTime); setActivePanel('NONE'); } }}
                                     disabled={!tempTime}
                                     className="bg-blue-600 text-white px-6 py-2.5 rounded-lg font-bold text-sm disabled:opacity-50 disabled:shadow-none shadow-md hover:bg-blue-700 transition-all"

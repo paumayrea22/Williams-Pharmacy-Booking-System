@@ -21,9 +21,11 @@ interface Appointment {
     id: number;
     professional_id: number;
     client_name: string;
+    client_phone: string;
     start_time_utc: string;
     end_time_utc: string;
     status: string;
+    room_number: number;
 }
 
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -39,12 +41,13 @@ export default function Calendar() {
     const [availabilities, setAvailabilities] = useState<Availability[]>([]);
     const [appointments, setAppointments] = useState<Appointment[]>([]);
     const [isDataLoading, setIsDataLoading] = useState(false);
-    
+    const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+
     // Interface visualization configuration
     const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
     const [isModalOpen, setIsModalOpen] = useState(false);
     
-    // Synchronization sequencer to force state reload without unmounting components
+    // Synchronization sequencer to force state reload
     const [refreshKey, setRefreshKey] = useState(0);
 
     // Initial effect: Retrieve staff layout mapping
@@ -67,7 +70,7 @@ export default function Calendar() {
         fetchProfessionals();
     }, []);
 
-    // Reactive effect: Downloads schedules and records when staff switch or a new record adds up
+    // Reactive effect: Downloads schedules and records
     useEffect(() => {
         if (!selectedProfessional) return;
 
@@ -104,6 +107,31 @@ export default function Calendar() {
 
         fetchProfessionalData();
     }, [selectedProfessional, refreshKey]);
+
+    // Data Mutation: Traditional execution flow to update status to cancelled
+    const handleCancelAppointment = async (appointmentId: number) => {
+        const confirmation = window.confirm('Are you strictly sure you want to cancel this appointment?');
+        if (!confirmation) return;
+
+        setActionLoadingId(appointmentId);
+        try {
+            const { error } = await supabase
+                .from('appointments')
+                .update({ status: 'cancelled' })
+                .eq('id', appointmentId);
+
+            if (error) {
+                throw new Error(error.message);
+            }
+
+            // Trigger the sequencer to update the visual grid instantly
+            setRefreshKey(prev => prev + 1);
+        } catch (error) {
+            alert('System Error: Infrastructure failed to cancel the appointment.');
+        } finally {
+            setActionLoadingId(null);
+        }
+    };
 
     const formatTime = (timeStr: string) => timeStr.substring(0, 5);
 
@@ -221,18 +249,28 @@ export default function Calendar() {
                                 
                                 <div className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm h-fit">
                                     <h3 className="font-semibold text-gray-800 mb-2">Booked Appointments</h3>
-                                    {appointments.length === 0 ? (
-                                        <p className="text-sm text-gray-500">No appointments booked yet.</p>
+                                    {appointments.filter(a => a.status !== 'cancelled').length === 0 ? (
+                                        <p className="text-sm text-gray-500">No active appointments booked yet.</p>
                                     ) : (
                                         <ul className="space-y-2">
-                                            {appointments.map((appt) => {
+                                            {appointments.filter(a => a.status !== 'cancelled').map((appt) => {
                                                 const date = new Date(appt.start_time_utc);
                                                 return (
-                                                    <li key={appt.id} className="text-sm text-gray-600 bg-gray-50 p-2 rounded border border-gray-100">
-                                                        <div className="font-medium text-gray-800">{appt.client_name}</div>
-                                                        <div className="text-xs text-gray-500 mt-1">
-                                                            {DAYS_OF_WEEK[date.getDay()]} | {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                    <li key={appt.id} className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100 flex items-center justify-between">
+                                                        <div>
+                                                            <div className="font-bold text-gray-800">{appt.client_name}</div>
+                                                            <div className="text-xs text-gray-500 mt-0.5">
+                                                                {DAYS_OF_WEEK[date.getDay()]} | {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                                            </div>
+                                                            <div className="text-xs font-semibold text-blue-600 mt-1">Room {appt.room_number}</div>
                                                         </div>
+                                                        <button
+                                                            onClick={() => handleCancelAppointment(appt.id)}
+                                                            disabled={actionLoadingId === appt.id}
+                                                            className="text-xs bg-red-50 text-red-600 border border-red-200 px-2.5 py-1.5 rounded-md font-bold hover:bg-red-600 hover:text-white hover:border-red-600 transition-all disabled:opacity-50"
+                                                        >
+                                                            {actionLoadingId === appt.id ? '...' : 'Cancel'}
+                                                        </button>
                                                     </li>
                                                 );
                                             })}
@@ -277,7 +315,6 @@ export default function Calendar() {
                 )}
             </div>
 
-            {/* Modal integration linked to state rules */}
             <AppointmentModal 
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
