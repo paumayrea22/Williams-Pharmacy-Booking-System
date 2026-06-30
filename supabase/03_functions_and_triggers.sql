@@ -12,7 +12,7 @@ BEGIN
 END
 $$;
 
--- OR REPLACE ensures the function updates cleanly without needing to be dropped
+-- Stored Procedure with reinforced security and algebraic overlap optimization
 CREATE OR REPLACE FUNCTION book_appointment_secure(
     p_professional_id BIGINT,
     p_room_number SMALLINT,
@@ -21,7 +21,11 @@ CREATE OR REPLACE FUNCTION book_appointment_secure(
     p_start_time_utc TIMESTAMPTZ,
     p_end_time_utc TIMESTAMPTZ,
     p_staff_username VARCHAR(50)
-) RETURNS VOID AS $$
+) RETURNS VOID 
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
 DECLARE
     v_day_of_week SMALLINT;
     v_start_time TIME;
@@ -33,7 +37,7 @@ BEGIN
     -- 1. Pessimistic Locking: Freeze the professional's row to serialize concurrent requests
     PERFORM id FROM professionals WHERE id = p_professional_id FOR UPDATE;
 
-    -- Normalize timestamps to Malta timezone to validate weekly schedules
+    -- Normalize timestamps to local timezone to validate weekly schedules
     v_day_of_week := EXTRACT(DOW FROM p_start_time_utc AT TIME ZONE 'Europe/Malta');
     v_start_time := (p_start_time_utc AT TIME ZONE 'Europe/Malta')::TIME;
     v_end_time := (p_end_time_utc AT TIME ZONE 'Europe/Malta')::TIME;
@@ -51,31 +55,25 @@ BEGIN
         RAISE EXCEPTION 'Operational Error: The selected time falls outside the professional working hours.';
     END IF;
 
-    -- 3. Concurrency Constraint: Prevent double booking of the same doctor (Race Condition)
+    -- 3. Concurrency Constraint: Prevent double booking of the same doctor (Optimized Algebraic Range Overlap)
     SELECT COUNT(*) INTO v_doctor_booked
     FROM appointments
     WHERE professional_id = p_professional_id
       AND status = 'confirmed'
-      AND (
-        (start_time_utc <= p_start_time_utc AND end_time_utc > p_start_time_utc) OR
-        (start_time_utc < p_end_time_utc AND end_time_utc >= p_end_time_utc) OR
-        (start_time_utc >= p_start_time_utc AND end_time_utc <= p_end_time_utc)
-      );
+      AND start_time_utc < p_end_time_utc 
+      AND end_time_utc > p_start_time_utc;
 
     IF v_doctor_booked > 0 THEN
         RAISE EXCEPTION 'Conflict Error: This professional already has a confirmed appointment at this time.';
     END IF;
 
-    -- 4. Hardware Constraint: Validate physical room collision
+    -- 4. Hardware Constraint: Validate physical room collision (Optimized Algebraic Range Overlap)
     SELECT COUNT(*) INTO v_room_booked
     FROM appointments
     WHERE room_number = p_room_number
       AND status = 'confirmed'
-      AND (
-        (start_time_utc <= p_start_time_utc AND end_time_utc > p_start_time_utc) OR
-        (start_time_utc < p_end_time_utc AND end_time_utc >= p_end_time_utc) OR
-        (start_time_utc >= p_start_time_utc AND end_time_utc <= p_end_time_utc)
-      );
+      AND start_time_utc < p_end_time_utc 
+      AND end_time_utc > p_start_time_utc;
 
     IF v_room_booked > 0 THEN
         RAISE EXCEPTION 'Hardware Error: Clinic Room % is already occupied by another patient at this time.', p_room_number;
@@ -90,4 +88,9 @@ BEGIN
         p_start_time_utc, p_end_time_utc, 'confirmed', p_staff_username
     );
 END;
-$$ LANGUAGE plpgsql;
+$$;
+
+-- Security Hardening: Revoke default public and anonymous execution, restrict strictly to authenticated staff
+REVOKE EXECUTE ON FUNCTION book_appointment_secure FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION book_appointment_secure FROM anon;
+GRANT EXECUTE ON FUNCTION book_appointment_secure TO authenticated;

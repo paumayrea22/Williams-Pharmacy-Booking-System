@@ -47,11 +47,12 @@ CREATE TABLE IF NOT EXISTS appointments (
     CHECK (start_time_utc < end_time_utc)
 );
 
--- Performance Indexes
+-- Performance Indexes (Critical for Nano instance memory management)
 CREATE INDEX IF NOT EXISTS idx_availabilities_prof_day ON availabilities(professional_id, day_of_week);
 CREATE INDEX IF NOT EXISTS idx_appointments_start_time ON appointments(start_time_utc);
 CREATE INDEX IF NOT EXISTS idx_appointments_room ON appointments(room_number);
 CREATE INDEX IF NOT EXISTS idx_appointments_professional ON appointments(professional_id);
+CREATE INDEX IF NOT EXISTS idx_appointments_status ON appointments(status);
 
 -- Idempotent Seed Data
 INSERT INTO professionals (full_name, specialty, default_duration_minutes) VALUES 
@@ -62,3 +63,28 @@ INSERT INTO professionals (full_name, specialty, default_duration_minutes) VALUE
 ('Anthea Borg', 'Podiatrist', 15),
 ('Dr. Sciberras', 'General Medicine', 15)
 ON CONFLICT (full_name) DO NOTHING;
+
+-- ==========================================
+-- System Extensions & Advanced Configuration
+-- ==========================================
+
+-- 1. Integration of CITEXT for Case-Insensitive Operational Searches
+ALTER TABLE professionals ALTER COLUMN full_name TYPE extensions.citext;
+ALTER TABLE appointments ALTER COLUMN client_name TYPE extensions.citext;
+
+-- 2. Configuration of PG_CRON for Automated Midnight Maintenance
+SELECT cron.schedule(
+    'nightly-appointment-cleanup',
+    '59 23 * * *',
+    $$ UPDATE public.appointments SET status = 'completed' WHERE end_time_utc < NOW() AND status = 'confirmed'; $$
+);
+
+-- 3. Integration of PG_TRGM for Fuzzy Text Searching (Typo Tolerance)
+-- Trigram indexes allow fast similarity matching without burning CPU cycles
+CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public;
+
+CREATE INDEX IF NOT EXISTS idx_professionals_name_trgm 
+ON professionals USING GIN (full_name extensions.gin_trgm_ops);
+
+CREATE INDEX IF NOT EXISTS idx_appointments_client_name_trgm 
+ON appointments USING GIN (client_name extensions.gin_trgm_ops);
