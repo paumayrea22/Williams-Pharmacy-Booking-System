@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './supabaseClient';
+import { DateTime } from 'luxon';
+import { getMaltaHolidays } from './holidays';
 
 interface Professional {
     id: number;
@@ -35,6 +37,11 @@ export default function StaffManagement() {
 
     const [errorMessage, setErrorMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+
+    // States for Malta public holiday overrides
+    const [openHolidayOverrides, setOpenHolidayOverrides] = useState<Set<string>>(new Set());
+    const [holidayActionLoading, setHolidayActionLoading] = useState<string | null>(null);
+    const [staffUsername, setStaffUsername] = useState('System');
 
     // Retrieves the complete list of clinic specialists
     const fetchProfessionals = async () => {
@@ -78,8 +85,26 @@ export default function StaffManagement() {
         }
     };
 
+    // Retrieves the dates the pharmacy explicitly opted to open despite being a Malta public holiday
+    const fetchHolidayOverrides = async () => {
+        try {
+            const { data, error } = await supabase.from('holiday_overrides').select('holiday_date');
+            if (error) throw new Error(error.message);
+            setOpenHolidayOverrides(new Set((data || []).map(row => row.holiday_date)));
+        } catch (error: any) {
+            setErrorMessage('Infrastructure error loading holiday overrides: ' + error.message);
+        }
+    };
+
     useEffect(() => {
         fetchProfessionals();
+        fetchHolidayOverrides();
+
+        const fetchUser = async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            setStaffUsername(user?.user_metadata?.username || 'System');
+        };
+        fetchUser();
     }, []);
 
     useEffect(() => {
@@ -176,6 +201,35 @@ export default function StaffManagement() {
             setIsLoading(false);
         }
     };
+
+    // Toggles a Malta public holiday between blocked (default) and open as a normal working day
+    const toggleHolidayOverride = async (holidayDate: string, isCurrentlyOpen: boolean) => {
+        setHolidayActionLoading(holidayDate);
+        try {
+            if (isCurrentlyOpen) {
+                const { error } = await supabase.from('holiday_overrides').delete().eq('holiday_date', holidayDate);
+                if (error) throw new Error(error.message);
+            } else {
+                const { error } = await supabase.from('holiday_overrides').insert({
+                    holiday_date: holidayDate,
+                    created_by_username: staffUsername
+                });
+                if (error) throw new Error(error.message);
+            }
+            await fetchHolidayOverrides();
+        } catch (error: any) {
+            setErrorMessage('Error updating holiday override: ' + error.message);
+        } finally {
+            setHolidayActionLoading(null);
+        }
+    };
+
+    // Malta public holidays for the current and next year, from today onward
+    const today = DateTime.local({ zone: 'Europe/Malta' }).startOf('day');
+    const upcomingHolidays = [
+        ...getMaltaHolidays(today.year),
+        ...getMaltaHolidays(today.year + 1)
+    ].filter(h => DateTime.fromISO(h.date, { zone: 'Europe/Malta' }) >= today);
 
     return (
         <div className="p-6 bg-gray-50 min-h-full flex flex-col gap-6">
@@ -307,6 +361,45 @@ export default function StaffManagement() {
                             </ul>
                         )}
                     </div>
+                </div>
+            </div>
+
+            {/* Malta Public Holidays Panel */}
+            <div className="bg-white border border-gray-200 p-5 rounded-xl shadow-sm flex flex-col gap-4">
+                <div className="border-b pb-2 border-gray-100">
+                    <h2 className="text-lg font-bold text-gray-800">Malta Public Holidays</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                        Bookings are blocked on these dates by default. Mark a holiday as "Open" if the pharmacy will operate as usual that day.
+                    </p>
+                </div>
+
+                <div className="max-h-72 overflow-y-auto border border-gray-100 rounded-lg">
+                    <ul className="divide-y divide-gray-100">
+                        {upcomingHolidays.map(holiday => {
+                            const isOpen = openHolidayOverrides.has(holiday.date);
+                            const isActionLoading = holidayActionLoading === holiday.date;
+                            return (
+                                <li key={holiday.date} className="p-3 text-xs flex justify-between items-center hover:bg-gray-50">
+                                    <div>
+                                        <span className="font-bold text-gray-700 mr-2">
+                                            {DateTime.fromISO(holiday.date).toFormat('dd/MM/yyyy')}
+                                        </span>
+                                        <span className="text-gray-600">{holiday.name}</span>
+                                        <span className={`ml-2 px-2 py-0.5 rounded-full font-bold ${isOpen ? 'bg-emerald-100 text-emerald-700' : 'bg-purple-100 text-purple-600'}`}>
+                                            {isOpen ? 'Open' : 'Holiday (Blocked)'}
+                                        </span>
+                                    </div>
+                                    <button
+                                        onClick={() => toggleHolidayOverride(holiday.date, isOpen)}
+                                        disabled={isActionLoading}
+                                        className={`font-bold transition disabled:opacity-50 ${isOpen ? 'text-purple-600 hover:text-purple-800' : 'text-emerald-600 hover:text-emerald-800'}`}
+                                    >
+                                        {isActionLoading ? '...' : (isOpen ? 'Revert to Holiday' : 'Mark as Open')}
+                                    </button>
+                                </li>
+                            );
+                        })}
+                    </ul>
                 </div>
             </div>
         </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import { DateTime } from 'luxon';
+import { getMaltaHolidayName } from './holidays';
 
 interface Professional {
     id: number;
@@ -57,6 +58,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
     const [monthAvailabilities, setMonthAvailabilities] = useState<Availability[]>([]);
     const [monthAppointments, setMonthAppointments] = useState<Appointment[]>([]);
     const [availableSlots, setAvailableSlots] = useState<{ time: string; isBooked: boolean }[]>([]);
+    const [openHolidayOverrides, setOpenHolidayOverrides] = useState<Set<string>>(new Set());
     
     const [currentMonth, setCurrentMonth] = useState<DateTime>(DateTime.local({ zone: 'Europe/Malta' }));
 
@@ -106,7 +108,26 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
             }
         };
         fetchUser();
+
+        const fetchHolidayOverrides = async () => {
+            const { data } = await supabase.from('holiday_overrides').select('holiday_date');
+            setOpenHolidayOverrides(new Set((data || []).map(row => row.holiday_date)));
+        };
+        fetchHolidayOverrides();
     }, [isOpen, selectedProfessionalId, professionals, appointmentToEdit]);
+
+    // Un día es festivo bloqueado en Malta salvo que el staff lo haya marcado explícitamente como abierto
+    const isHolidayBlocked = (dateObj: DateTime): boolean => {
+        const dateISO = dateObj.toISODate();
+        if (!dateISO) return false;
+        return getMaltaHolidayName(dateISO) !== null && !openHolidayOverrides.has(dateISO);
+    };
+
+    const getHolidayName = (dateObj: DateTime): string | null => {
+        const dateISO = dateObj.toISODate();
+        if (!dateISO) return null;
+        return getMaltaHolidayName(dateISO);
+    };
 
     useEffect(() => {
         if (!isOpen || !modalProfessionalId) return;
@@ -247,6 +268,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
         
         if (isSelected) return 'bg-blue-600 text-white shadow-md ring-2 ring-blue-300';
         if (dateObj < today) return 'bg-gray-100 text-gray-400 cursor-not-allowed opacity-60';
+        if (isHolidayBlocked(dateObj)) return 'bg-purple-50 text-purple-500 border border-purple-200 cursor-not-allowed opacity-80 line-through';
 
         const sqlDayOfWeek = dateObj.weekday === 7 ? 0 : dateObj.weekday;
         const dayAvails = monthAvailabilities.filter(a => a.day_of_week === sqlDayOfWeek);
@@ -296,7 +318,8 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
             const isSelected = tempDate?.toISODate() === dateObj.toISODate();
             const today = DateTime.local({ zone: 'Europe/Malta' }).startOf('day');
             const sqlDayOfWeek = dateObj.weekday === 7 ? 0 : dateObj.weekday;
-            const isDisabled = (dateObj < today) || !monthAvailabilities.some(a => a.day_of_week === sqlDayOfWeek);
+            const holidayName = getHolidayName(dateObj);
+            const isDisabled = (dateObj < today) || isHolidayBlocked(dateObj) || !monthAvailabilities.some(a => a.day_of_week === sqlDayOfWeek);
 
             days.push(
                 <button
@@ -304,6 +327,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                     type="button"
                     onClick={() => !isDisabled && setTempDate(dateObj)}
                     disabled={isDisabled}
+                    title={holidayName ?? undefined}
                     className={`h-9 w-full rounded-md text-sm transition-colors ${getDayColorClass(dateObj, isSelected)}`}
                 >
                     {i}
@@ -327,10 +351,11 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                     {days}
                 </div>
 
-                <div className="flex justify-center gap-4 mt-6 mb-2 text-xs font-medium text-gray-500 shrink-0">
+                <div className="flex flex-wrap justify-center gap-4 mt-6 mb-2 text-xs font-medium text-gray-500 shrink-0">
                     <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-gray-200"></span> Unavailable</div>
                     <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-blue-100 border border-blue-300"></span> Available</div>
                     <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-red-100 border border-red-300"></span> Booked</div>
+                    <div className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-full bg-purple-50 border border-purple-200"></span> Holiday</div>
                 </div>
             </>
         );
