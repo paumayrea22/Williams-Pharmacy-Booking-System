@@ -112,7 +112,11 @@ export default function Login() {
                             type="password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
+<<<<<<< HEAD
                             placeholder="Minimum  characters"
+=======
+                            placeholder="Minimum 8 characters"
+>>>>>>> 6ad67489c4a8a7eb7150dd64f24138a86bc05bc2
                             className="mt-1 w-full rounded-md border border-gray-300 p-3 shadow-sm focus:border-blue-500 focus:outline-none"
                             required
                             disabled={isProcessing}

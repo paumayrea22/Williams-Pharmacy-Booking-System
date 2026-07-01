@@ -53,7 +53,14 @@ interface IncomingAlert {
 }
 
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-const WORKING_HOURS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19];
+
+// Quarter-hour slots from 08:00 to 19:45
+const TIME_SLOTS: { hour: number; minute: number }[] = [];
+for (let hour = 8; hour <= 19; hour++) {
+    for (const minute of [0, 15, 30, 45]) {
+        TIME_SLOTS.push({ hour, minute });
+    }
+}
 
 export default function Calendar() {
     const [professionals, setProfessionals] = useState<Professional[]>([]);
@@ -70,6 +77,10 @@ export default function Calendar() {
     const [activeNotification, setActiveNotification] = useState<IncomingAlert | null>(null);
 
     const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
+    const [gridSelectedDay, setGridSelectedDay] = useState<number>(() => {
+        const todayWeekday = DateTime.local({ zone: 'Europe/Malta' }).weekday;
+        return todayWeekday === 7 ? 6 : todayWeekday - 1;
+    });
     
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [appointmentToEdit, setAppointmentToEdit] = useState<Appointment | null>(null);
@@ -213,21 +224,24 @@ export default function Calendar() {
         return acc;
     }, {} as Record<number, Availability[]>);
 
-    const getCellStatus = (dayIndex: number, hour: number) => {
+    const getCellStatus = (dayIndex: number, hour: number, minute: number) => {
         const sqlDayIndex = dayIndex === 6 ? 0 : dayIndex + 1;
-        
+        const slotMinutes = hour * 60 + minute;
+
         const hasAppointment = appointments.some(appt => {
             const apptTime = DateTime.fromISO(appt.start_time_utc, { zone: 'Europe/Malta' });
             const apptSqlDay = apptTime.weekday === 7 ? 0 : apptTime.weekday;
-            return apptSqlDay === sqlDayIndex && apptTime.hour === hour && appt.status !== 'cancelled';
+            return apptSqlDay === sqlDayIndex && apptTime.hour === hour && apptTime.minute === minute && appt.status !== 'cancelled';
         });
-        
+
         if (hasAppointment) return 'bg-green-200 border-green-300 text-green-800 font-medium';
 
         const isAvailable = availabilities.some(avail => {
-            const startHour = parseInt(avail.start_time.split(':')[0]);
-            const endHour = parseInt(avail.end_time.split(':')[0]);
-            return avail.day_of_week === sqlDayIndex && hour >= startHour && hour < endHour;
+            const [startHour, startMinute] = avail.start_time.split(':').map(Number);
+            const [endHour, endMinute] = avail.end_time.split(':').map(Number);
+            const startMinutes = startHour * 60 + startMinute;
+            const endMinutes = endHour * 60 + endMinute;
+            return avail.day_of_week === sqlDayIndex && slotMinutes >= startMinutes && slotMinutes < endMinutes;
         });
 
         if (isAvailable) return 'bg-white border-gray-200';
@@ -368,36 +382,47 @@ export default function Calendar() {
                                 </div>
                             </div>
                         ) : (
-                            <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
-                                <table className="w-full text-sm text-left border-collapse">
-                                    <thead className="bg-gray-50 text-gray-700">
-                                        <tr>
-                                            <th className="border border-gray-200 px-4 py-3 font-semibold text-center w-24">Time</th>
-                                            {[0, 1, 2, 3, 4, 5, 6].map(dayIndex => (
-                                                <th key={dayIndex} className="border border-gray-200 px-4 py-3 font-semibold text-center">
-                                                    {DAYS_OF_WEEK[dayIndex]}
+                            <div className="flex flex-col gap-3">
+                                <div className="flex items-center justify-end gap-2">
+                                    <label className="text-sm font-medium text-gray-600">Day:</label>
+                                    <select
+                                        value={gridSelectedDay}
+                                        onChange={(e) => setGridSelectedDay(Number(e.target.value))}
+                                        className="rounded-md border border-gray-300 bg-gray-50 p-2 text-sm text-gray-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                                    >
+                                        {DAYS_OF_WEEK.map((day, idx) => (
+                                            <option key={idx} value={idx}>{day}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+                                    <table className="w-full text-sm text-left border-collapse">
+                                        <thead className="bg-gray-50 text-gray-700">
+                                            <tr>
+                                                <th className="border border-gray-200 px-4 py-3 font-semibold text-center w-24">Time</th>
+                                                <th className="border border-gray-200 px-4 py-3 font-semibold text-center">
+                                                    {DAYS_OF_WEEK[gridSelectedDay]}
                                                 </th>
-                                            ))}
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {WORKING_HOURS.map(hour => (
-                                            <tr key={hour}>
-                                                <td className="border border-gray-200 px-4 py-2 text-center text-gray-600 font-medium bg-gray-50">
-                                                    {hour.toString().padStart(2, '0')}:00
-                                                </td>
-                                                {[0, 1, 2, 3, 4, 5, 6].map(dayIndex => {
-                                                    const cellClass = getCellStatus(dayIndex, hour);
-                                                    return (
-                                                        <td key={`${dayIndex}-${hour}`} className={`border px-2 py-4 text-center transition-colors text-xs ${cellClass}`}>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {TIME_SLOTS.map(({ hour, minute }) => {
+                                                const cellClass = getCellStatus(gridSelectedDay, hour, minute);
+                                                return (
+                                                    <tr key={`${hour}-${minute}`}>
+                                                        <td className="border border-gray-200 px-4 py-2 text-center text-gray-600 font-medium bg-gray-50">
+                                                            {hour.toString().padStart(2, '0')}:{minute.toString().padStart(2, '0')}
+                                                        </td>
+                                                        <td className={`border px-2 py-3 text-center transition-colors text-xs ${cellClass}`}>
                                                             {cellClass.includes('green') ? 'Booked' : ''}
                                                         </td>
-                                                    );
-                                                })}
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         )}
                     </div>
