@@ -281,7 +281,6 @@ export default function Calendar() {
             <header className="flex flex-col gap-4 border-b border-gray-200 p-6 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-800">Appointment Management</h1>
-                    <p className="text-sm text-gray-500">Select a professional to view their availability</p>
                 </div>
                 <div className="flex items-center gap-4">
                     {isDoctor ? (
