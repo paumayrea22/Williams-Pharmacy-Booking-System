@@ -1,7 +1,17 @@
 import { useEffect, useState } from 'react';
-import { supabase } from './supabaseClient';
+import { supabase } from './lib/supabase';
 import { DateTime } from 'luxon';
 import AppointmentModal from './AppointmentModal';
+import { useAuth } from './context/AuthContext';
+
+// Safari still requires the vendor-prefixed constructor, which is absent from the DOM lib types
+interface WindowWithWebkitAudio extends Window {
+    webkitAudioContext?: typeof AudioContext;
+}
+
+const getAudioContextConstructor = (): typeof AudioContext => {
+    return window.AudioContext || (window as WindowWithWebkitAudio).webkitAudioContext || AudioContext;
+};
 
 // Shared global audio engine instance to bypass strict browser autoplay policies
 let sharedAudioContext: AudioContext | null = null;
@@ -9,8 +19,7 @@ let sharedAudioContext: AudioContext | null = null;
 const unlockAudioEngine = () => {
     try {
         if (!sharedAudioContext) {
-            const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-            sharedAudioContext = new AudioCtx();
+            sharedAudioContext = new (getAudioContextConstructor())();
         }
         if (sharedAudioContext.state === 'suspended') {
             sharedAudioContext.resume();
@@ -54,15 +63,23 @@ interface IncomingAlert {
 
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-// Quarter-hour slots from 08:00 to 19:45
-const TIME_SLOTS: { hour: number; minute: number }[] = [];
-for (let hour = 8; hour <= 19; hour++) {
+// Quarter-hour slots split into a morning shift (08:00-13:45) and an afternoon shift (14:00-19:45)
+const MORNING_SLOTS: { hour: number; minute: number }[] = [];
+for (let hour = 8; hour < 14; hour++) {
     for (const minute of [0, 15, 30, 45]) {
-        TIME_SLOTS.push({ hour, minute });
+        MORNING_SLOTS.push({ hour, minute });
+    }
+}
+
+const AFTERNOON_SLOTS: { hour: number; minute: number }[] = [];
+for (let hour = 14; hour <= 19; hour++) {
+    for (const minute of [0, 15, 30, 45]) {
+        AFTERNOON_SLOTS.push({ hour, minute });
     }
 }
 
 export default function Calendar() {
+    const { role, username } = useAuth();
     const [professionals, setProfessionals] = useState<Professional[]>([]);
     const [selectedProfessional, setSelectedProfessional] = useState<string>('');
     const [isStaffLoading, setIsStaffLoading] = useState(true);
@@ -100,8 +117,7 @@ export default function Calendar() {
     const playAlertSound = () => {
         try {
             if (!sharedAudioContext) {
-                const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-                sharedAudioContext = new AudioCtx();
+                sharedAudioContext = new (getAudioContextConstructor())();
             }
             
             if (sharedAudioContext.state === 'suspended') {
@@ -130,14 +146,12 @@ export default function Calendar() {
     useEffect(() => {
         const fetchProfessionals = async () => {
             const { data, error } = await supabase.from('professionals').select('*').order('id', { ascending: true });
-            const { data: { user } } = await supabase.auth.getUser();
-            const username = user?.user_metadata?.username || 'System';
 
             if (!error && data && data.length > 0) {
                 setProfessionals(data);
 
                 let lockedToOwnProfile = false;
-                if (username.startsWith('D-')) {
+                if (role === 'doctor' && username) {
                     const doctorNameSuffix = username.split('-')[1];
                     const matchingDoctor = data.find(p => p.full_name.includes(doctorNameSuffix));
                     if (matchingDoctor) {
@@ -153,7 +167,7 @@ export default function Calendar() {
             setIsStaffLoading(false);
         };
         fetchProfessionals();
-    }, []);
+    }, [role, username]);
 
     useEffect(() => {
         if (!selectedProfessional) return;
@@ -199,7 +213,7 @@ export default function Calendar() {
             const { error } = await supabase.from('appointments').update({ status: 'cancelled' }).eq('id', appointmentId);
             if (error) throw new Error(error.message);
             setRefreshKey(prev => prev + 1);
-        } catch (error) {
+        } catch {
             alert('System Error: Infrastructure failed to cancel the appointment.');
         } finally {
             setActionLoadingId(null);
@@ -396,32 +410,39 @@ export default function Calendar() {
                                     </select>
                                 </div>
 
-                                <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
-                                    <table className="w-full text-sm text-left border-collapse">
-                                        <thead className="bg-gray-50 text-gray-700">
-                                            <tr>
-                                                <th className="border border-gray-200 px-4 py-3 font-semibold text-center w-24">Time</th>
-                                                <th className="border border-gray-200 px-4 py-3 font-semibold text-center">
-                                                    {DAYS_OF_WEEK[gridSelectedDay]}
-                                                </th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {TIME_SLOTS.map(({ hour, minute }) => {
-                                                const cellClass = getCellStatus(gridSelectedDay, hour, minute);
-                                                return (
-                                                    <tr key={`${hour}-${minute}`}>
-                                                        <td className="border border-gray-200 px-4 py-2 text-center text-gray-600 font-medium bg-gray-50">
-                                                            {hour.toString().padStart(2, '0')}:{minute.toString().padStart(2, '0')}
-                                                        </td>
-                                                        <td className={`border px-2 py-3 text-center transition-colors text-xs ${cellClass}`}>
-                                                            {cellClass.includes('green') ? 'Booked' : ''}
-                                                        </td>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {[
+                                        { label: 'Morning', slots: MORNING_SLOTS },
+                                        { label: 'Afternoon', slots: AFTERNOON_SLOTS },
+                                    ].map(({ label, slots }) => (
+                                        <div key={label} className="overflow-x-auto rounded-lg border border-gray-200 bg-white shadow-sm">
+                                            <table className="w-full text-sm text-left border-collapse">
+                                                <thead className="bg-gray-50 text-gray-700">
+                                                    <tr>
+                                                        <th className="border border-gray-200 px-4 py-3 font-semibold text-center w-24">Time</th>
+                                                        <th className="border border-gray-200 px-4 py-3 font-semibold text-center">
+                                                            {DAYS_OF_WEEK[gridSelectedDay]} - {label}
+                                                        </th>
                                                     </tr>
-                                                );
-                                            })}
-                                        </tbody>
-                                    </table>
+                                                </thead>
+                                                <tbody>
+                                                    {slots.map(({ hour, minute }) => {
+                                                        const cellClass = getCellStatus(gridSelectedDay, hour, minute);
+                                                        return (
+                                                            <tr key={`${hour}-${minute}`}>
+                                                                <td className="border border-gray-200 px-4 py-2 text-center text-gray-600 font-medium bg-gray-50">
+                                                                    {hour.toString().padStart(2, '0')}:{minute.toString().padStart(2, '0')}
+                                                                </td>
+                                                                <td className={`border px-2 py-3 text-center transition-colors text-xs ${cellClass}`}>
+                                                                    {cellClass.includes('green') ? 'Booked' : ''}
+                                                                </td>
+                                                            </tr>
+                                                        );
+                                                    })}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                         )}

@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { supabase } from './supabaseClient';
+import { supabase } from './lib/supabase';
 import { DateTime } from 'luxon';
 import { getMaltaHolidayName } from './holidays';
+import { useAuth } from './context/AuthContext';
+import { getErrorMessage } from './lib/errors';
 
 interface Professional {
     id: number;
@@ -35,13 +37,13 @@ interface AppointmentModalProps {
     onSuccess: () => void;
     selectedProfessionalId: string;
     professionals: Professional[];
-    appointmentToEdit?: Appointment | null; // Nueva propiedad para inyectar datos
+    appointmentToEdit?: Appointment | null; // Existing appointment to prefill the form for rescheduling
 }
 
 export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedProfessionalId, professionals, appointmentToEdit }: AppointmentModalProps) {
-    const [currentUserRole, setCurrentUserRole] = useState<'PHARMACIST' | 'DOCTOR'>('PHARMACIST');
-    const [staffUsername, setStaffUsername] = useState('System');
-    
+    const { role, username } = useAuth(); // Sealed role read from app_metadata, never user_metadata
+    const staffUsername = username ?? 'System';
+
     const [modalProfessionalId, setModalProfessionalId] = useState(selectedProfessionalId);
     const [clientName, setClientName] = useState('');
     const [clientPhone, setClientPhone] = useState('');
@@ -62,27 +64,27 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
     
     const [currentMonth, setCurrentMonth] = useState<DateTime>(DateTime.local({ zone: 'Europe/Malta' }));
 
-    // Efecto de inicialización e inyección de datos de edición
+    // Initialization effect: prefills the form when editing, resets it for a new booking
     useEffect(() => {
         if (!isOpen) return;
-        
+
         setActivePanel('NONE');
         setErrorMessage('');
         setCurrentMonth(DateTime.local({ zone: 'Europe/Malta' }));
 
         if (appointmentToEdit) {
-            // Rellenar formulario con los datos de la cita existente
+            // Prefill the form with the existing appointment's data
             setModalProfessionalId(appointmentToEdit.professional_id.toString());
             setClientName(appointmentToEdit.client_name);
             setClientPhone(appointmentToEdit.client_phone);
             setRoomNumber(appointmentToEdit.room_number.toString());
-            
+
             const oldDate = DateTime.fromISO(appointmentToEdit.start_time_utc, { zone: 'Europe/Malta' });
             setConfirmedDate(oldDate);
             setConfirmedTime(oldDate.toFormat('HH:mm'));
             setCurrentMonth(oldDate);
         } else {
-            // Formulario vacío por defecto para nuevas reservas
+            // Empty form by default for new bookings
             setModalProfessionalId(selectedProfessionalId);
             setConfirmedDate(null);
             setConfirmedTime(null);
@@ -93,30 +95,21 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
         setTempDate(null);
         setTempTime(null);
 
-        const fetchUser = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            const username = user?.user_metadata?.username || 'System';
-            setStaffUsername(username);
-            
-            if (username.startsWith('D-')) {
-                setCurrentUserRole('DOCTOR');
-                const doctorName = username.split('-')[1];
-                const matchingProf = professionals.find(p => p.full_name.includes(doctorName));
-                if (matchingProf) setModalProfessionalId(matchingProf.id.toString());
-            } else {
-                setCurrentUserRole('PHARMACIST');
-            }
-        };
-        fetchUser();
+        // Doctors are locked to their own professional record, matched by username suffix
+        if (role === 'doctor' && username) {
+            const doctorName = username.split('-')[1];
+            const matchingProf = professionals.find(p => p.full_name.includes(doctorName));
+            if (matchingProf) setModalProfessionalId(matchingProf.id.toString());
+        }
 
         const fetchHolidayOverrides = async () => {
             const { data } = await supabase.from('holiday_overrides').select('holiday_date');
             setOpenHolidayOverrides(new Set((data || []).map(row => row.holiday_date)));
         };
         fetchHolidayOverrides();
-    }, [isOpen, selectedProfessionalId, professionals, appointmentToEdit]);
+    }, [isOpen, selectedProfessionalId, professionals, appointmentToEdit, role, username]);
 
-    // Un día es festivo bloqueado en Malta salvo que el staff lo haya marcado explícitamente como abierto
+    // A day is blocked as a Malta holiday unless the staff explicitly marked it as open
     const isHolidayBlocked = (dateObj: DateTime): boolean => {
         const dateISO = dateObj.toISODate();
         if (!dateISO) return false;
@@ -170,7 +163,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                 const timeString = currentSlot.toFormat('HH:mm');
                 const isBooked = monthAppointments.some(appt => {
                     const apptDate = DateTime.fromISO(appt.start_time_utc, { zone: 'Europe/Malta' });
-                    // Ignorar la cita actual si estamos en modo edición para no auto-bloquearse
+                    // Ignore the current appointment when in edit mode to avoid self-blocking
                     if (appointmentToEdit && appt.id === appointmentToEdit.id) return false;
                     
                     return apptDate.toISODate() === selectedDateString &&
@@ -221,7 +214,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
         let isRollbackNeeded = false;
 
         try {
-            // Fase 1: Si es una modificación, cancelar temporalmente la original
+            // Phase 1: If this is a modification, temporarily cancel the original slot
             if (appointmentToEdit) {
                 const { error: cancelError } = await supabase
                     .from('appointments')
@@ -232,7 +225,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                 isRollbackNeeded = true;
             }
 
-            // Fase 2: Ejecutar RPC de seguridad con los nuevos datos
+            // Phase 2: Execute the secure RPC with the new booking data
             const { error: rpcError } = await supabase.rpc('book_appointment_secure', {
                 p_professional_id: parseInt(modalProfessionalId),
                 p_room_number: parseInt(roomNumber),
@@ -243,7 +236,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                 p_staff_username: staffUsername
             });
 
-            // Fase 3: Evaluación de Rollback (Revertir cambios si RPC falla)
+            // Phase 3: Rollback evaluation (revert changes if the RPC fails)
             if (rpcError) {
                 if (isRollbackNeeded && appointmentToEdit) {
                     await supabase
@@ -256,8 +249,8 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
             
             onSuccess();
             onClose();
-        } catch (error: any) {
-            setErrorMessage(error.message || 'System error during reservation.');
+        } catch (error) {
+            setErrorMessage(getErrorMessage(error, 'System error during reservation.'));
         } finally {
             setIsSubmitting(false);
         }
@@ -379,7 +372,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                     <form onSubmit={handleFormSubmit} className="space-y-4 flex-1 flex flex-col">
                         <div>
                             <label className="block text-sm font-semibold text-gray-700 mb-1">Attending Professional</label>
-                            {currentUserRole === 'DOCTOR' ? (
+                            {role === 'doctor' ? (
                                 <div className="w-full rounded-lg border border-gray-300 bg-gray-100 p-2 text-gray-500 font-medium">
                                     {(() => {
                                         const own = professionals.find(p => p.id.toString() === modalProfessionalId);

@@ -2,15 +2,27 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 
+// Staff role sealed server-side in app_metadata by the sync_role_to_app_metadata trigger,
+// never trusted from user_metadata since that field is client-writable
+export type StaffRole = 'doctor' | 'pharmacist' | null;
+
 // Define the exact shape of the authentication context
 interface AuthState {
   session: Session | null;
   user: User | null;
+  role: StaffRole;
+  username: string | null;
   isLoading: boolean;
 }
 
 // Initialize context without default values to enforce provider usage
 const AuthContext = createContext<AuthState | undefined>(undefined);
+
+// Reads the role exclusively from app_metadata, which only the Postgres trigger can write
+const deriveRole = (user: User | null): StaffRole => {
+  const role = user?.app_metadata?.role;
+  return role === 'doctor' || role === 'pharmacist' ? role : null;
+};
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [session, setSession] = useState<Session | null>(null);
@@ -41,8 +53,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, []);
 
+  // Username is display-only metadata (used for profile matching), never for security decisions
+  const role = deriveRole(user);
+  const username = (user?.user_metadata?.username as string | undefined) ?? null;
+
   return (
-    <AuthContext.Provider value={{ session, user, isLoading }}>
+    <AuthContext.Provider value={{ session, user, role, username, isLoading }}>
       {children}
     </AuthContext.Provider>
   );

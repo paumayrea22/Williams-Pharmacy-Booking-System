@@ -19,14 +19,14 @@ export default function Login() {
 
         try {
             if (isRegistering) {
-                // Strict prefix validation using RegEx for Doctors and Pharmacists
+                // Validación estricta mediante RegEx para perfiles médicos y farmacéuticos
                 const prefixRegex = /^(D-|P-).+$/;
                 
                 if (!prefixRegex.test(username)) {
                     throw new Error('Error: Username must strictly start with "D-" (Doctor) or "P-" (Pharmacy). Ex: P-Denisse');
                 }
 
-                // Register in Supabase injecting the username. The SQL Trigger will assign the immutable role.
+                // Registro en Supabase inyectando el nombre de usuario en los metadatos
                 const { error: authError } = await supabase.auth.signUp({
                     email: email,
                     password: password,
@@ -43,7 +43,7 @@ export default function Login() {
                 
                 navigate('/');
             } else {
-                // Standard login flow
+                // Flujo estándar de inicio de sesión
                 const { error: authError } = await supabase.auth.signInWithPassword({
                     email: email,
                     password: password
@@ -56,10 +56,10 @@ export default function Login() {
                 navigate('/');
             }
         } catch (error: any) {
-            // Catch generic exceptions and errors delegated by Supabase
+            // Captura de excepciones genéricas y errores delegados por Supabase
             setErrorMessage(error.message || 'An unexpected network error occurred.');
         } finally {
-            // Guaranteed UI unlock regardless of the result
+            // Liberación del bloqueo de interfaz garantizada independientemente del resultado
             setIsProcessing(false);
         }
     };
@@ -113,7 +113,6 @@ export default function Login() {
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             placeholder="Minimum 8 characters"
-                            minLength={8}
                             className="mt-1 w-full rounded-md border border-gray-300 p-3 shadow-sm focus:border-blue-500 focus:outline-none"
                             required
                             disabled={isProcessing}

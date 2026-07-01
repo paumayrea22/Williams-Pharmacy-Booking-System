@@ -1,39 +1,30 @@
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { supabase } from './lib/supabase';
-// Importamos el estado global para no tener que hacer peticiones redundantes al servidor
+// Read the global auth state instead of issuing redundant requests to the server
 import { useAuth } from './context/AuthContext';
 
 export default function Layout() {
     const location = useLocation();
     const navigate = useNavigate();
-    const { user } = useAuth(); // Extraemos el usuario directamente de la memoria global
-    
-    const [username, setUsername] = useState('User');
-    const [role, setRole] = useState('STAFF');
+    const { username, role } = useAuth(); // Sealed role read from app_metadata, never user_metadata
+
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-    useEffect(() => {
-        // Leemos los metadatos sincronizados sin necesidad de usar async/await contra Supabase
-        if (user?.user_metadata?.username) {
-            const uName = user.user_metadata.username;
-            setUsername(uName);
-            // Determina el rol visual basado en el prefijo estricto de seguridad
-            setRole(uName.startsWith('D-') ? 'DOCTOR' : 'PHARMACIST');
-        }
-    }, [user]);
+    const displayUsername = username ?? 'User';
+    const displayRole = role ? role.toUpperCase() : 'STAFF';
 
     const handleSignOut = async () => {
-        // Destruye el token JWT en el servidor y en el almacenamiento local
+        // Destroy the JWT token on the server and clear local storage
         await supabase.auth.signOut();
-        // El ProtectedRoute detectará la caída de la sesión, pero forzamos la navegación por UX
+        // ProtectedRoute will detect the dropped session, but we force navigation for UX
         navigate('/login');
     };
 
     return (
         <div className="relative flex h-screen w-screen bg-gray-50 overflow-hidden font-sans">
 
-            {/* Barra lateral de navegación, plegable horizontalmente */}
+            {/* Horizontally collapsible navigation sidebar */}
             <aside
                 className={`bg-[#1e293b] text-white flex flex-col justify-between shrink-0 z-20 shadow-xl overflow-hidden transition-all duration-300 ${
                     isSidebarOpen ? 'w-64' : 'w-0'
@@ -50,8 +41,8 @@ export default function Layout() {
                                     </svg>
                                 </div>
                                 <div className="flex flex-col">
-                                    <span className="text-xs font-semibold text-slate-400">{role}</span>
-                                    <span className="text-sm font-medium">{username}</span>
+                                    <span className="text-xs font-semibold text-slate-400">{displayRole}</span>
+                                    <span className="text-sm font-medium">{displayUsername}</span>
                                 </div>
                             </div>
                         </div>
@@ -66,7 +57,7 @@ export default function Layout() {
                                 Calendar
                             </Link>
 
-                            {/* Nuevo botón de enlace al módulo de gestión del jueves */}
+                            {/* Link to the staff management module */}
                             <Link
                                 to="/staff"
                                 className={`px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${
@@ -92,7 +83,7 @@ export default function Layout() {
                 </div>
             </aside>
 
-            {/* Botón semicircular pegado al borde del panel para plegar/desplegar */}
+            {/* Semicircular toggle button attached to the panel edge to collapse/expand */}
             <button
                 onClick={() => setIsSidebarOpen(prev => !prev)}
                 aria-label={isSidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
@@ -110,7 +101,7 @@ export default function Layout() {
                 </svg>
             </button>
 
-            {/* Contenedor dinámico inyectado por React Router (Outlet) */}
+            {/* Dynamic container injected by React Router (Outlet) */}
             <main className="flex-1 overflow-hidden relative">
                 <Outlet />
             </main>

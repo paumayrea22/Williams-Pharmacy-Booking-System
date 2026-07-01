@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
-import { supabase } from './supabaseClient';
+import { supabase } from './lib/supabase';
 import { DateTime } from 'luxon';
 import { getMaltaHolidays } from './holidays';
+import { useAuth } from './context/AuthContext';
+import { getErrorMessage } from './lib/errors';
 
 interface Professional {
     id: number;
@@ -21,6 +23,9 @@ interface Availability {
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export default function StaffManagement() {
+    const { role, username } = useAuth(); // Sealed role read from app_metadata, never user_metadata
+    const staffUsername = username ?? 'System';
+
     const [professionals, setProfessionals] = useState<Professional[]>([]);
     const [selectedProfessional, setSelectedProfessional] = useState<string>('');
     const [availabilities, setAvailabilities] = useState<Availability[]>([]);
@@ -41,7 +46,6 @@ export default function StaffManagement() {
     // States for Malta public holiday overrides
     const [openHolidayOverrides, setOpenHolidayOverrides] = useState<Set<string>>(new Set());
     const [holidayActionLoading, setHolidayActionLoading] = useState<string | null>(null);
-    const [staffUsername, setStaffUsername] = useState('System');
 
     // Retrieves the complete list of clinic specialists
     const fetchProfessionals = async () => {
@@ -60,8 +64,8 @@ export default function StaffManagement() {
                     setSelectedProfessional(data[0].id.toString());
                 }
             }
-        } catch (error: any) {
-            setErrorMessage('Infrastructure error loading professionals: ' + error.message);
+        } catch (error) {
+            setErrorMessage('Infrastructure error loading professionals: ' + getErrorMessage(error));
         }
     };
 
@@ -80,8 +84,8 @@ export default function StaffManagement() {
                 throw new Error(error.message);
             }
             setAvailabilities(data || []);
-        } catch (error: any) {
-            setErrorMessage('Infrastructure error loading availabilities: ' + error.message);
+        } catch (error) {
+            setErrorMessage('Infrastructure error loading availabilities: ' + getErrorMessage(error));
         }
     };
 
@@ -91,20 +95,14 @@ export default function StaffManagement() {
             const { data, error } = await supabase.from('holiday_overrides').select('holiday_date');
             if (error) throw new Error(error.message);
             setOpenHolidayOverrides(new Set((data || []).map(row => row.holiday_date)));
-        } catch (error: any) {
-            setErrorMessage('Infrastructure error loading holiday overrides: ' + error.message);
+        } catch (error) {
+            setErrorMessage('Infrastructure error loading holiday overrides: ' + getErrorMessage(error));
         }
     };
 
     useEffect(() => {
         fetchProfessionals();
         fetchHolidayOverrides();
-
-        const fetchUser = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            setStaffUsername(user?.user_metadata?.username || 'System');
-        };
-        fetchUser();
     }, []);
 
     useEffect(() => {
@@ -140,8 +138,8 @@ export default function StaffManagement() {
             setNewSpecialty('');
             setNewDuration('15');
             await fetchProfessionals();
-        } catch (error: any) {
-            setErrorMessage('Error inserting professional: ' + error.message);
+        } catch (error) {
+            setErrorMessage('Error inserting professional: ' + getErrorMessage(error));
         } finally {
             setIsLoading(false);
         }
@@ -171,8 +169,8 @@ export default function StaffManagement() {
             }
 
             await fetchAvailabilities();
-        } catch (error: any) {
-            setErrorMessage('Error adding availability timeframe: ' + error.message);
+        } catch (error) {
+            setErrorMessage('Error adding availability timeframe: ' + getErrorMessage(error));
         } finally {
             setIsLoading(false);
         }
@@ -195,8 +193,8 @@ export default function StaffManagement() {
             }
 
             await fetchAvailabilities();
-        } catch (error: any) {
-            setErrorMessage('Error purging schedule: ' + error.message);
+        } catch (error) {
+            setErrorMessage('Error purging schedule: ' + getErrorMessage(error));
         } finally {
             setIsLoading(false);
         }
@@ -217,8 +215,8 @@ export default function StaffManagement() {
                 if (error) throw new Error(error.message);
             }
             await fetchHolidayOverrides();
-        } catch (error: any) {
-            setErrorMessage('Error updating holiday override: ' + error.message);
+        } catch (error) {
+            setErrorMessage('Error updating holiday override: ' + getErrorMessage(error));
         } finally {
             setHolidayActionLoading(null);
         }
@@ -370,6 +368,7 @@ export default function StaffManagement() {
                     <h2 className="text-lg font-bold text-gray-800">Malta Public Holidays</h2>
                     <p className="text-xs text-gray-500 mt-0.5">
                         Bookings are blocked on these dates by default. Mark a holiday as "Open" if the pharmacy will operate as usual that day.
+                        {role !== 'pharmacist' && ' Only pharmacists can toggle this setting.'}
                     </p>
                 </div>
 
@@ -389,13 +388,15 @@ export default function StaffManagement() {
                                             {isOpen ? 'Open' : 'Holiday (Blocked)'}
                                         </span>
                                     </div>
-                                    <button
-                                        onClick={() => toggleHolidayOverride(holiday.date, isOpen)}
-                                        disabled={isActionLoading}
-                                        className={`font-bold transition disabled:opacity-50 ${isOpen ? 'text-purple-600 hover:text-purple-800' : 'text-emerald-600 hover:text-emerald-800'}`}
-                                    >
-                                        {isActionLoading ? '...' : (isOpen ? 'Revert to Holiday' : 'Mark as Open')}
-                                    </button>
+                                    {role === 'pharmacist' && (
+                                        <button
+                                            onClick={() => toggleHolidayOverride(holiday.date, isOpen)}
+                                            disabled={isActionLoading}
+                                            className={`font-bold transition disabled:opacity-50 ${isOpen ? 'text-purple-600 hover:text-purple-800' : 'text-emerald-600 hover:text-emerald-800'}`}
+                                        >
+                                            {isActionLoading ? '...' : (isOpen ? 'Revert to Holiday' : 'Mark as Open')}
+                                        </button>
+                                    )}
                                 </li>
                             );
                         })}

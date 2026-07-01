@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { supabase } from './supabaseClient';
+import { supabase } from './lib/supabase';
 import { DateTime } from 'luxon';
+import { getErrorMessage } from './lib/errors';
 
 interface TestResult {
     threadId: number;
@@ -32,8 +33,8 @@ export default function StressTest() {
                 }
                 
                 setTargetProfessional(data);
-            } catch (error: any) {
-                console.error('Failed to load target professional:', error.message);
+            } catch (error) {
+                console.error('Failed to load target professional:', getErrorMessage(error));
             }
         };
         
@@ -95,14 +96,14 @@ export default function StressTest() {
                 if (result.status === 'fulfilled') {
                     return { threadId: index + 1, status: 'success', message: result.value };
                 } else {
-                    return { threadId: index + 1, status: 'failed', message: result.reason.message };
+                    return { threadId: index + 1, status: 'failed', message: getErrorMessage(result.reason) };
                 }
             });
 
             setTestResults(finalResults);
 
-        } catch (error: any) {
-            console.error('Catastrophic failure in test harness:', error.message);
+        } catch (error) {
+            console.error('Catastrophic failure in test harness:', getErrorMessage(error));
         } finally {
             setIsTesting(false);
         }

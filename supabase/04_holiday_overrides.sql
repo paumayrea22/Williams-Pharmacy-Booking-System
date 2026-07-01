@@ -13,21 +13,23 @@ CREATE TABLE IF NOT EXISTS holiday_overrides (
 
 ALTER TABLE holiday_overrides ENABLE ROW LEVEL SECURITY;
 
--- Limpieza de politicas previas para evitar conflictos de sobreescritura
+-- Clean up previous policies to avoid naming collisions on re-run
 DROP POLICY IF EXISTS "Enable read access for authenticated users" ON holiday_overrides;
-DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON holiday_overrides;
-DROP POLICY IF EXISTS "Enable delete for authenticated users only" ON holiday_overrides;
+DROP POLICY IF EXISTS "Enable insert for pharmacists only" ON holiday_overrides;
+DROP POLICY IF EXISTS "Enable delete for pharmacists only" ON holiday_overrides;
 
--- LECTURA: Todos los usuarios autenticados (Medicos y Farmaceuticos) necesitan leer si la clinica abre
+-- READ: All authenticated staff (doctors and pharmacists) need to know whether the pharmacy is open
 CREATE POLICY "Enable read access for authenticated users"
 ON holiday_overrides FOR SELECT TO authenticated USING (true);
 
--- ESCRITURA: Solo los usuarios cuyo username empiece por 'P-' (Farmaceuticos) pueden crear excepciones
+-- WRITE: Only staff sealed with the 'pharmacist' role in app_metadata can create exceptions.
+-- app_metadata is only writable server-side (see 05_app_metadata_rbac.sql), unlike user_metadata
+-- which the client SDK can freely rewrite, so it is the only trustworthy source for RLS checks.
 CREATE POLICY "Enable insert for pharmacists only"
-ON holiday_overrides FOR INSERT TO authenticated 
-WITH CHECK ((auth.jwt() -> 'user_metadata' ->> 'username')::text LIKE 'P-%');
+ON holiday_overrides FOR INSERT TO authenticated
+WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'pharmacist');
 
--- BORRADO: Solo los usuarios cuyo username empiece por 'P-' (Farmaceuticos) pueden eliminar excepciones
+-- DELETE: Only staff sealed with the 'pharmacist' role in app_metadata can remove exceptions
 CREATE POLICY "Enable delete for pharmacists only"
-ON holiday_overrides FOR DELETE TO authenticated 
-USING ((auth.jwt() -> 'user_metadata' ->> 'username')::text LIKE 'P-%');
+ON holiday_overrides FOR DELETE TO authenticated
+USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'pharmacist');
