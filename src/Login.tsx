@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { supabase } from './supabaseClient';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from './lib/supabase';
 
 export default function Login() {
     const [isRegistering, setIsRegistering] = useState(false);
@@ -8,50 +8,59 @@ export default function Login() {
     const [password, setPassword] = useState('');
     const [username, setUsername] = useState('');
     const [errorMessage, setErrorMessage] = useState('');
+    const [isProcessing, setIsProcessing] = useState(false);
     
     const navigate = useNavigate();
 
     const handleFormSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setErrorMessage('');
+        setIsProcessing(true);
 
-        if (isRegistering) {
-            // Strict prefix validation using RegEx for Doctors and Pharmacists
-            const prefixRegex = /^(D-|P-).+$/;
-            
-            if (!prefixRegex.test(username)) {
-                setErrorMessage('Error: Username must strictly start with "D-" (Doctor) or "P-" (Pharmacy). Ex: P-Denisse');
-                return;
-            }
-
-            // Register in Supabase injecting the username into metadata
-            const { error: authError } = await supabase.auth.signUp({
-                email: email,
-                password: password,
-                options: {
-                    data: {
-                        username: username
-                    }
+        try {
+            if (isRegistering) {
+                // Validación estricta mediante RegEx para perfiles médicos y farmacéuticos
+                const prefixRegex = /^(D-|P-).+$/;
+                
+                if (!prefixRegex.test(username)) {
+                    throw new Error('Error: Username must strictly start with "D-" (Doctor) or "P-" (Pharmacy). Ex: P-Denisse');
                 }
-            });
 
-            if (authError) {
-                setErrorMessage(authError.message);
-            } else {
-                navigate('/calendar');
-            }
-        } else {
-            // Standard login
-            const { error: authError } = await supabase.auth.signInWithPassword({
-                email: email,
-                password: password
-            });
+                // Registro en Supabase inyectando el nombre de usuario en los metadatos
+                const { error: authError } = await supabase.auth.signUp({
+                    email: email,
+                    password: password,
+                    options: {
+                        data: {
+                            username: username
+                        }
+                    }
+                });
 
-            if (authError) {
-                setErrorMessage('Invalid credentials. Please verify your email and password.');
+                if (authError) {
+                    throw new Error(authError.message);
+                }
+                
+                navigate('/');
             } else {
-                navigate('/calendar');
+                // Flujo estándar de inicio de sesión
+                const { error: authError } = await supabase.auth.signInWithPassword({
+                    email: email,
+                    password: password
+                });
+
+                if (authError) {
+                    throw new Error('Invalid credentials. Please verify your email and password.');
+                }
+                
+                navigate('/');
             }
+        } catch (error: any) {
+            // Captura de excepciones genéricas y errores delegados por Supabase
+            setErrorMessage(error.message || 'An unexpected network error occurred.');
+        } finally {
+            // Liberación del bloqueo de interfaz garantizada independientemente del resultado
+            setIsProcessing(false);
         }
     };
 
@@ -79,6 +88,7 @@ export default function Login() {
                                 placeholder="Ex: P-Denisse or D-Fsadni"
                                 className="mt-1 w-full rounded-md border border-gray-300 p-3 shadow-sm focus:border-blue-500 focus:outline-none"
                                 required={isRegistering}
+                                disabled={isProcessing}
                             />
                         </div>
                     )}
@@ -92,6 +102,7 @@ export default function Login() {
                             placeholder="email@pharmacy.com"
                             className="mt-1 w-full rounded-md border border-gray-300 p-3 shadow-sm focus:border-blue-500 focus:outline-none"
                             required
+                            disabled={isProcessing}
                         />
                     </div>
 
@@ -104,14 +115,18 @@ export default function Login() {
                             placeholder="Minimum 6 characters"
                             className="mt-1 w-full rounded-md border border-gray-300 p-3 shadow-sm focus:border-blue-500 focus:outline-none"
                             required
+                            disabled={isProcessing}
                         />
                     </div>
 
                     <button
                         type="submit"
-                        className="w-full rounded-md bg-blue-600 p-3 font-semibold text-white transition hover:bg-blue-700"
+                        disabled={isProcessing}
+                        className={`w-full rounded-md p-3 font-semibold text-white transition ${
+                            isProcessing ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                        }`}
                     >
-                        {isRegistering ? 'Create Secure Account' : 'Enter System'}
+                        {isProcessing ? 'Processing...' : (isRegistering ? 'Create Secure Account' : 'Enter System')}
                     </button>
                 </form>
 
@@ -121,7 +136,8 @@ export default function Login() {
                             setIsRegistering(!isRegistering);
                             setErrorMessage('');
                         }}
-                        className="text-sm text-blue-600 hover:underline"
+                        disabled={isProcessing}
+                        className="text-sm text-blue-600 hover:underline disabled:text-gray-400"
                     >
                         {isRegistering ? 'Already have an account? Sign in' : 'First time? Create your password'}
                     </button>
