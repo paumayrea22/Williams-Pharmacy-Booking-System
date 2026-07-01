@@ -1,28 +1,31 @@
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { supabase } from './supabaseClient';
 import { useEffect, useState } from 'react';
+import { supabase } from './lib/supabase';
+// Importamos el estado global para no tener que hacer peticiones redundantes al servidor
+import { useAuth } from './context/AuthContext';
 
 export default function Layout() {
     const location = useLocation();
     const navigate = useNavigate();
+    const { user } = useAuth(); // Extraemos el usuario directamente de la memoria global
+    
     const [username, setUsername] = useState('User');
     const [role, setRole] = useState('STAFF');
 
     useEffect(() => {
-        const fetchUser = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user?.user_metadata?.username) {
-                const uName = user.user_metadata.username;
-                setUsername(uName);
-                // Determina el rol visual basado en el prefijo estricto de seguridad
-                setRole(uName.startsWith('D-') ? 'DOCTOR' : 'PHARMACIST');
-            }
-        };
-        fetchUser();
-    }, []);
+        // Leemos los metadatos sincronizados sin necesidad de usar async/await contra Supabase
+        if (user?.user_metadata?.username) {
+            const uName = user.user_metadata.username;
+            setUsername(uName);
+            // Determina el rol visual basado en el prefijo estricto de seguridad
+            setRole(uName.startsWith('D-') ? 'DOCTOR' : 'PHARMACIST');
+        }
+    }, [user]);
 
     const handleSignOut = async () => {
+        // Destruye el token JWT en el servidor y en el almacenamiento local
         await supabase.auth.signOut();
+        // El ProtectedRoute detectará la caída de la sesión, pero forzamos la navegación por UX
         navigate('/login');
     };
 
