@@ -354,16 +354,24 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                     <form onSubmit={handleFormSubmit} className="space-y-4 flex-1 flex flex-col">
                         <div>
                             <label className="block text-sm font-semibold text-gray-700 mb-1">Attending Professional</label>
-                            <select 
-                                value={modalProfessionalId}
-                                onChange={(e) => setModalProfessionalId(e.target.value)}
-                                disabled={currentUserRole === 'DOCTOR'}
-                                className="w-full rounded-lg border border-gray-300 p-2 text-gray-800 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-gray-100 disabled:text-gray-500"
-                            >
-                                {professionals.map(prof => (
-                                    <option key={prof.id} value={prof.id}>{prof.full_name} ({prof.specialty})</option>
-                                ))}
-                            </select>
+                            {currentUserRole === 'DOCTOR' ? (
+                                <div className="w-full rounded-lg border border-gray-300 bg-gray-100 p-2 text-gray-500 font-medium">
+                                    {(() => {
+                                        const own = professionals.find(p => p.id.toString() === modalProfessionalId);
+                                        return own ? `${own.full_name} (${own.specialty})` : 'Unknown professional';
+                                    })()}
+                                </div>
+                            ) : (
+                                <select
+                                    value={modalProfessionalId}
+                                    onChange={(e) => setModalProfessionalId(e.target.value)}
+                                    className="w-full rounded-lg border border-gray-300 p-2 text-gray-800 shadow-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
+                                >
+                                    {professionals.map(prof => (
+                                        <option key={prof.id} value={prof.id}>{prof.full_name} ({prof.specialty})</option>
+                                    ))}
+                                </select>
+                            )}
                         </div>
 
                         <div>

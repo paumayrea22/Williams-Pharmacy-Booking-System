@@ -66,6 +66,7 @@ export default function Calendar() {
     const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
 
     const [doctorProfId, setDoctorProfId] = useState<number | null>(null);
+    const [isDoctor, setIsDoctor] = useState(false);
     const [activeNotification, setActiveNotification] = useState<IncomingAlert | null>(null);
 
     const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
@@ -118,19 +119,27 @@ export default function Calendar() {
     useEffect(() => {
         const fetchProfessionals = async () => {
             const { data, error } = await supabase.from('professionals').select('*').order('id', { ascending: true });
-            if (!error && data && data.length > 0) {
-                setProfessionals(data);
-                setSelectedProfessional(data[0].id.toString());
-            }
-            setIsStaffLoading(false);
-
             const { data: { user } } = await supabase.auth.getUser();
             const username = user?.user_metadata?.username || 'System';
-            if (username.startsWith('D-') && data) {
-                const doctorNameSuffix = username.split('-')[1];
-                const matchingDoctor = data.find(p => p.full_name.includes(doctorNameSuffix));
-                if (matchingDoctor) setDoctorProfId(matchingDoctor.id);
+
+            if (!error && data && data.length > 0) {
+                setProfessionals(data);
+
+                let lockedToOwnProfile = false;
+                if (username.startsWith('D-')) {
+                    const doctorNameSuffix = username.split('-')[1];
+                    const matchingDoctor = data.find(p => p.full_name.includes(doctorNameSuffix));
+                    if (matchingDoctor) {
+                        setDoctorProfId(matchingDoctor.id);
+                        setIsDoctor(true);
+                        setSelectedProfessional(matchingDoctor.id.toString());
+                        lockedToOwnProfile = true;
+                    }
+                }
+
+                if (!lockedToOwnProfile) setSelectedProfessional(data[0].id.toString());
             }
+            setIsStaffLoading(false);
         };
         fetchProfessionals();
     }, []);
@@ -247,16 +256,27 @@ export default function Calendar() {
                     <p className="text-sm text-gray-500">Select a professional to view their availability</p>
                 </div>
                 <div className="flex items-center gap-4">
-                    <select 
-                        value={selectedProfessional}
-                        onChange={(e) => setSelectedProfessional(e.target.value)}
-                        disabled={isStaffLoading || isDataLoading}
-                        className="rounded-md border border-gray-300 bg-gray-50 p-2 text-gray-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
-                    >
-                        {isStaffLoading ? <option>Loading staff...</option> : professionals.map((prof) => (
-                            <option key={prof.id} value={prof.id}>{prof.full_name} ({prof.specialty})</option>
-                        ))}
-                    </select>
+                    {isDoctor ? (
+                        <div className="rounded-md border border-gray-300 bg-gray-50 p-2 text-gray-800 shadow-sm font-medium">
+                            {isStaffLoading
+                                ? 'Loading staff...'
+                                : (() => {
+                                    const own = professionals.find(p => p.id.toString() === selectedProfessional);
+                                    return own ? `${own.full_name} (${own.specialty})` : 'Unknown professional';
+                                })()}
+                        </div>
+                    ) : (
+                        <select
+                            value={selectedProfessional}
+                            onChange={(e) => setSelectedProfessional(e.target.value)}
+                            disabled={isStaffLoading || isDataLoading}
+                            className="rounded-md border border-gray-300 bg-gray-50 p-2 text-gray-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
+                        >
+                            {isStaffLoading ? <option>Loading staff...</option> : professionals.map((prof) => (
+                                <option key={prof.id} value={prof.id}>{prof.full_name} ({prof.specialty})</option>
+                            ))}
+                        </select>
+                    )}
                     <button onClick={() => setIsModalOpen(true)} className="rounded-md bg-blue-600 px-4 py-2 font-medium text-white transition hover:bg-blue-700">+ New Appointment</button>
                 </div>
             </header>
