@@ -102,7 +102,7 @@ export default function Layout() {
             </button>
 
             {/* Dynamic container injected by React Router (Outlet) */}
-            <main className="flex-1 overflow-hidden relative">
+            <main className="flex-1 overflow-y-auto relative custom-scrollbar">
                 <Outlet />
             </main>
         </div>

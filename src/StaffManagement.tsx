@@ -334,7 +334,7 @@ export default function StaffManagement() {
                         </div>
                     </form>
 
-                    <div className="flex-1 overflow-y-auto max-h-60 border border-gray-100 rounded-lg">
+                    <div className="flex-1 overflow-y-auto max-h-60 border border-gray-100 rounded-lg custom-scrollbar">
                         {availabilities.length === 0 ? (
                             <p className="text-xs text-gray-400 p-4 text-center">No working hours assigned for this specialist.</p>
                         ) : (
@@ -372,7 +372,7 @@ export default function StaffManagement() {
                     </p>
                 </div>
 
-                <div className="max-h-72 overflow-y-auto border border-gray-100 rounded-lg">
+                <div className="max-h-72 overflow-y-auto border border-gray-100 rounded-lg custom-scrollbar pr-1">
                     <ul className="divide-y divide-gray-100">
                         {upcomingHolidays.map(holiday => {
                             const isOpen = openHolidayOverrides.has(holiday.date);

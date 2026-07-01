@@ -1,1 +1,26 @@
 @import "tailwindcss";
+
+/* Visible, styled scrollbar for scrollable list panels */
+.custom-scrollbar {
+    scrollbar-width: auto;
+    scrollbar-color: #64748b #e2e8f0;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+    width: 14px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: #e2e8f0;
+    border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background-color: #64748b;
+    border-radius: 9999px;
+    border: 3px solid #e2e8f0;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: #475569;
+}
