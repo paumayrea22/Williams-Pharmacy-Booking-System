@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
+import { getErrorMessage } from './lib/errors';
 
 export default function Login() {
     const [isRegistering, setIsRegistering] = useState(false);
@@ -19,14 +20,14 @@ export default function Login() {
 
         try {
             if (isRegistering) {
-                // Validación estricta mediante RegEx para perfiles médicos y farmacéuticos
+                // Strict prefix validation using RegEx for Doctors and Pharmacists
                 const prefixRegex = /^(D-|P-).+$/;
                 
                 if (!prefixRegex.test(username)) {
                     throw new Error('Error: Username must strictly start with "D-" (Doctor) or "P-" (Pharmacy). Ex: P-Denisse');
                 }
 
-                // Registro en Supabase inyectando el nombre de usuario en los metadatos
+                // Register in Supabase injecting the username. The SQL Trigger will assign the immutable role.
                 const { error: authError } = await supabase.auth.signUp({
                     email: email,
                     password: password,
@@ -43,7 +44,7 @@ export default function Login() {
                 
                 navigate('/');
             } else {
-                // Flujo estándar de inicio de sesión
+                // Standard login flow
                 const { error: authError } = await supabase.auth.signInWithPassword({
                     email: email,
                     password: password
@@ -55,11 +56,11 @@ export default function Login() {
                 
                 navigate('/');
             }
-        } catch (error: any) {
-            // Captura de excepciones genéricas y errores delegados por Supabase
-            setErrorMessage(error.message || 'An unexpected network error occurred.');
+        } catch (error) {
+            // Catch generic exceptions and errors delegated by Supabase using the strict error handler
+            setErrorMessage(getErrorMessage(error, 'An unexpected network error occurred.'));
         } finally {
-            // Liberación del bloqueo de interfaz garantizada independientemente del resultado
+            // Guaranteed UI unlock regardless of the result
             setIsProcessing(false);
         }
     };
@@ -113,6 +114,7 @@ export default function Login() {
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             placeholder="Minimum 8 characters"
+                            minLength={8}
                             className="mt-1 w-full rounded-md border border-gray-300 p-3 shadow-sm focus:border-blue-500 focus:outline-none"
                             required
                             disabled={isProcessing}
