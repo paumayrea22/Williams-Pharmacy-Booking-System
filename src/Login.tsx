@@ -19,14 +19,14 @@ export default function Login() {
 
         try {
             if (isRegistering) {
-                // Validación estricta mediante RegEx para perfiles médicos y farmacéuticos
+                // Strict prefix validation using RegEx for Doctors and Pharmacists
                 const prefixRegex = /^(D-|P-).+$/;
                 
                 if (!prefixRegex.test(username)) {
                     throw new Error('Error: Username must strictly start with "D-" (Doctor) or "P-" (Pharmacy). Ex: P-Denisse');
                 }
 
-                // Registro en Supabase inyectando el nombre de usuario en los metadatos
+                // Register in Supabase injecting the username. The SQL Trigger will assign the immutable role.
                 const { error: authError } = await supabase.auth.signUp({
                     email: email,
                     password: password,
@@ -43,7 +43,7 @@ export default function Login() {
                 
                 navigate('/');
             } else {
-                // Flujo estándar de inicio de sesión
+                // Standard login flow
                 const { error: authError } = await supabase.auth.signInWithPassword({
                     email: email,
                     password: password
@@ -56,10 +56,10 @@ export default function Login() {
                 navigate('/');
             }
         } catch (error: any) {
-            // Captura de excepciones genéricas y errores delegados por Supabase
+            // Catch generic exceptions and errors delegated by Supabase
             setErrorMessage(error.message || 'An unexpected network error occurred.');
         } finally {
-            // Liberación del bloqueo de interfaz garantizada independientemente del resultado
+            // Guaranteed UI unlock regardless of the result
             setIsProcessing(false);
         }
     };
@@ -112,11 +112,8 @@ export default function Login() {
                             type="password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
-<<<<<<< HEAD
-                            placeholder="Minimum  characters"
-=======
                             placeholder="Minimum 8 characters"
->>>>>>> 6ad67489c4a8a7eb7150dd64f24138a86bc05bc2
+                            minLength={8}
                             className="mt-1 w-full rounded-md border border-gray-300 p-3 shadow-sm focus:border-blue-500 focus:outline-none"
                             required
                             disabled={isProcessing}
