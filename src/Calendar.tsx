@@ -7,7 +7,6 @@ import { getMaltaHolidayName } from './holidays';
 import { getErrorMessage } from './lib/errors';
 import { formatDisplayPhone } from './lib/countryCodes';
 
-// Safari still requires the vendor-prefixed constructor, which is absent from the DOM lib types
 interface WindowWithWebkitAudio extends Window {
     webkitAudioContext?: typeof AudioContext;
 }
@@ -16,7 +15,6 @@ const getAudioContextConstructor = (): typeof AudioContext => {
     return window.AudioContext || (window as WindowWithWebkitAudio).webkitAudioContext || AudioContext;
 };
 
-// Shared global audio engine instance to bypass strict browser autoplay policies
 let sharedAudioContext: AudioContext | null = null;
 
 const unlockAudioEngine = () => {
@@ -72,6 +70,18 @@ interface SlotDetails {
 
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
+const MORNING_SLOTS: { hour: number; minute: number }[] = [];
+for (let hour = 8; hour < 14; hour++) {
+    for (const minute of [0, 15, 30, 45]) MORNING_SLOTS.push({ hour, minute });
+}
+
+const AFTERNOON_SLOTS: { hour: number; minute: number }[] = [];
+for (let hour = 14; hour <= 19; hour++) {
+    for (const minute of [0, 15, 30, 45]) AFTERNOON_SLOTS.push({ hour, minute });
+}
+
+const FULL_DAY_SLOTS: { hour: number; minute: number }[] = [...MORNING_SLOTS, ...AFTERNOON_SLOTS];
+
 // Builds slots from startHour (inclusive) to endHour (exclusive), stepping by the given minute interval
 const buildTimeSlots = (startHour: number, endHour: number, stepMinutes: number): { hour: number; minute: number }[] => {
     const slots: { hour: number; minute: number }[] = [];
@@ -80,7 +90,6 @@ const buildTimeSlots = (startHour: number, endHour: number, stepMinutes: number)
     }
     return slots;
 };
-
 
 export default function Calendar() {
     const { role, username } = useAuth();
@@ -97,24 +106,25 @@ export default function Calendar() {
     const [isDoctor, setIsDoctor] = useState(false);
     const [activeNotification, setActiveNotification] = useState<IncomingAlert | null>(null);
 
-    // Temporal pagination state
     const [currentWeekStart, setCurrentWeekStart] = useState<DateTime>(() => DateTime.local({ zone: 'Europe/Malta' }).startOf('week'));
-
     const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
     const [gridSelectedDay, setGridSelectedDay] = useState<number>(() => {
         const todayWeekday = DateTime.local({ zone: 'Europe/Malta' }).weekday;
         return todayWeekday === 7 ? 6 : todayWeekday - 1;
     });
     
+    // Modal Deep-Linking States
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [appointmentToEdit, setAppointmentToEdit] = useState<Appointment | null>(null);
+    const [prefilledDate, setPrefilledDate] = useState<DateTime | null>(null);
+    const [prefilledTime, setPrefilledTime] = useState<string[]>([]);
+    const [prefilledRoom, setPrefilledRoom] = useState<string>('');
+    
     const [refreshKey, setRefreshKey] = useState(0);
 
-    // 1. Hardware unlock mechanism binding
     useEffect(() => {
         document.addEventListener('click', unlockAudioEngine, { once: true });
         document.addEventListener('keydown', unlockAudioEngine, { once: true });
-        
         return () => {
             document.removeEventListener('click', unlockAudioEngine);
             document.removeEventListener('keydown', unlockAudioEngine);
@@ -123,14 +133,9 @@ export default function Calendar() {
 
     const playAlertSound = () => {
         try {
-            if (!sharedAudioContext) {
-                sharedAudioContext = new (getAudioContextConstructor())();
-            }
+            if (!sharedAudioContext) sharedAudioContext = new (getAudioContextConstructor())();
+            if (sharedAudioContext.state === 'suspended') sharedAudioContext.resume();
             
-            if (sharedAudioContext.state === 'suspended') {
-                sharedAudioContext.resume();
-            }
-
             const oscillator = sharedAudioContext.createOscillator();
             const gainNode = sharedAudioContext.createGain();
             
@@ -169,7 +174,7 @@ export default function Calendar() {
                     }
                 }
 
-                if (!lockedToOwnProfile) setSelectedProfessional(data[0].id.toString());
+                if (!lockedToOwnProfile) setSelectedProfessional('ALL');
             }
             setIsStaffLoading(false);
         };
@@ -184,15 +189,19 @@ export default function Calendar() {
             const startUtc = currentWeekStart.startOf('week').toUTC().toISO();
             const endUtc = currentWeekStart.endOf('week').toUTC().toISO();
 
-            const [availabilitiesResponse, appointmentsResponse] = await Promise.all([
-                supabase.from('availabilities').select('*').eq('professional_id', selectedProfessional),
-                supabase.from('appointments')
-                    .select('*')
-                    .eq('professional_id', selectedProfessional)
-                    .gte('start_time_utc', startUtc)
-                    .lte('start_time_utc', endUtc)
-                    .order('start_time_utc', { ascending: true })
-            ]);
+            let availQuery = supabase.from('availabilities').select('*');
+            let apptQuery = supabase.from('appointments')
+                .select('*')
+                .gte('start_time_utc', startUtc)
+                .lte('start_time_utc', endUtc)
+                .order('start_time_utc', { ascending: true });
+
+            if (selectedProfessional !== 'ALL') {
+                availQuery = availQuery.eq('professional_id', selectedProfessional);
+                apptQuery = apptQuery.eq('professional_id', selectedProfessional);
+            }
+
+            const [availabilitiesResponse, appointmentsResponse] = await Promise.all([availQuery, apptQuery]);
 
             setAvailabilities(availabilitiesResponse.data || []);
             setAppointments(appointmentsResponse.data || []);
@@ -240,40 +249,39 @@ export default function Calendar() {
         setIsModalOpen(true);
     };
 
+    const handleEmptySlotClick = (dateObj: DateTime, timeStr: string, defaultRoom?: string) => {
+        setPrefilledDate(dateObj);
+        setPrefilledTime([timeStr]);
+        if (defaultRoom) setPrefilledRoom(defaultRoom);
+        setIsModalOpen(true);
+    };
+
     const handleCloseModal = () => {
         setIsModalOpen(false);
         setAppointmentToEdit(null);
+        setPrefilledDate(null);
+        setPrefilledTime([]);
+        setPrefilledRoom('');
     };
 
     const formatTime = (timeStr: string) => timeStr.substring(0, 5);
 
-    const groupedAvailabilities = availabilities.reduce((acc, curr) => {
-        if (!acc[curr.day_of_week]) acc[curr.day_of_week] = [];
-        acc[curr.day_of_week].push(curr);
-        return acc;
-    }, {} as Record<number, Availability[]>);
-
-    // Evaluates constraints and maps data to the correct slot
-    const getSlotDetails = (dayIndex: number, hour: number, minute: number): SlotDetails => {
+    const getSlotDetails = (dayIndex: number, hour: number, minute: number, targetRoom?: number): SlotDetails => {
         const slotDate = currentWeekStart.plus({ days: dayIndex }).set({ hour, minute });
         const sqlDayIndex = slotDate.weekday === 7 ? 0 : slotDate.weekday;
 
-        // Constraint 1: Block Sundays and Malta public holidays strictly
-        if (slotDate.weekday === 7 || getMaltaHolidayName(slotDate.toISODate()!)) {
-            return { status: 'Holiday', label: 'Holiday' };
-        }
+        const holidayName = getMaltaHolidayName(slotDate.toISODate()!);
+        if (holidayName) return { status: 'Holiday', label: holidayName };
 
-        // Constraint 2: Locate exact booked appointments
         const bookedAppt = appointments.find(appt => {
-            const apptTime = DateTime.fromISO(appt.start_time_utc, { zone: 'Europe/Malta' });
-            return apptTime.hasSame(slotDate, 'day') && apptTime.hour === hour && apptTime.minute === minute && appt.status !== 'cancelled';
+            const apptStart = DateTime.fromISO(appt.start_time_utc, { zone: 'Europe/Malta' });
+            const apptEnd = DateTime.fromISO(appt.end_time_utc, { zone: 'Europe/Malta' });
+            const matchesRoom = targetRoom ? appt.room_number === targetRoom : true;
+            return appt.status !== 'cancelled' && matchesRoom && slotDate >= apptStart && slotDate < apptEnd;
         });
 
-        if (bookedAppt) {
-            return { status: 'Booked', appointment: bookedAppt };
-        }
+        if (bookedAppt) return { status: 'Booked', appointment: bookedAppt };
 
-        // Constraint 3: Verify if the professional operates within this timeframe
         const slotMinutes = hour * 60 + minute;
         const isAvailable = availabilities.some(avail => {
             const [startHour, startMinute] = avail.start_time.split(':').map(Number);
@@ -283,12 +291,57 @@ export default function Calendar() {
             return avail.day_of_week === sqlDayIndex && slotMinutes >= startMins && slotMinutes < endMins;
         });
 
-        if (isAvailable) {
-            return { status: 'Available' };
-        }
-
+        if (isAvailable) return { status: 'Available' };
         return { status: 'Unavailable' };
     };
+
+    const renderAppointmentCard = (appt: Appointment) => {
+        const apptTime = DateTime.fromISO(appt.start_time_utc, { zone: 'Europe/Malta' });
+        const uiDayIndex = apptTime.weekday === 7 ? 6 : apptTime.weekday - 1;
+        const prof = professionals.find(p => p.id === appt.professional_id);
+
+        return (
+            <li key={appt.id} className="text-sm bg-white p-4 rounded-xl border border-pharmacy-ink/10 shadow-sm flex flex-col gap-2">
+                <div className="flex justify-between items-start gap-3">
+                    <div>
+                        <div className="flex items-baseline gap-2">
+                            <span className="font-bold text-pharmacy-ink">{appt.client_name}</span>
+                            <span className="text-xs font-mono text-pharmacy-muted">{formatDisplayPhone(appt.client_phone)}</span>
+                        </div>
+                        <div className="text-xs text-pharmacy-muted mt-0.5">
+                            {selectedProfessional === 'ALL' && prof ? <span className="font-bold text-pharmacy-gold-dark mr-1">{prof.full_name} ·</span> : null}
+                            {DAYS_OF_WEEK[uiDayIndex]} · {apptTime.toFormat('HH:mm')}
+                        </div>
+                    </div>
+                    {selectedProfessional !== 'ALL' && (
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-pharmacy-ink bg-pharmacy-cream-dark border border-pharmacy-ink/10 px-2.5 py-1.5 rounded-md shrink-0">Room {appt.room_number}</span>
+                    )}
+                </div>
+                <div className="flex gap-4 mt-2 pt-3 border-t border-dashed border-pharmacy-ink/10">
+                    <button
+                        onClick={() => handleReschedule(appt)}
+                        disabled={actionLoadingId === appt.id}
+                        className="text-xs font-bold text-pharmacy-gold-dark hover:text-pharmacy-gold transition-colors disabled:opacity-50 uppercase tracking-wide"
+                    >
+                        Reschedule
+                    </button>
+                    <button
+                        onClick={() => handleCancelAppointment(appt.id)}
+                        disabled={actionLoadingId === appt.id}
+                        className="text-xs font-bold text-red-700/80 hover:text-red-700 transition-colors disabled:opacity-50 uppercase tracking-wide"
+                    >
+                        {actionLoadingId === appt.id ? '...' : 'Cancel'}
+                    </button>
+                </div>
+            </li>
+        );
+    };
+
+    const groupedAvailabilities = availabilities.reduce((acc, curr) => {
+        if (!acc[curr.day_of_week]) acc[curr.day_of_week] = [];
+        acc[curr.day_of_week].push(curr);
+        return acc;
+    }, {} as Record<number, Availability[]>);
 
     // The grid's slot granularity mirrors the selected professional's own consultation length
     // (set per-specialty by the pharmacist in Staff Management: 15 / 30 / 60 minutes).
@@ -298,7 +351,6 @@ export default function Calendar() {
 
     return (
         <div className="flex h-full flex-col bg-pharmacy-cream relative">
-
             {activeNotification && (
                 <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 w-11/12 max-w-md bg-pharmacy-green text-white p-4 rounded-xl shadow-2xl border border-pharmacy-green-light flex flex-col gap-2 animate-fadeIn">
                     <div className="flex justify-between items-start">
@@ -312,7 +364,7 @@ export default function Calendar() {
                 </div>
             )}
 
-            <header className="flex flex-col gap-4 border-b border-pharmacy-cream-dark p-6 sm:flex-row sm:items-end sm:justify-between">
+            <header className="flex flex-col gap-4 border-b border-pharmacy-cream-dark p-6 sm:flex-row sm:items-end sm:justify-between shrink-0">
                 <div>
                     <p className="text-xs font-semibold tracking-[0.2em] text-pharmacy-gold-dark uppercase mb-1">Appointment Management</p>
                     <h1 className="font-display text-3xl text-pharmacy-ink">
@@ -322,26 +374,25 @@ export default function Calendar() {
                 <div className="flex items-center gap-4">
                     {isDoctor ? (
                         <div className="rounded-full border border-pharmacy-ink/20 bg-white px-4 py-2 text-pharmacy-ink shadow-sm font-medium text-sm">
-                            {isStaffLoading
-                                ? 'Loading staff...'
-                                : (() => {
-                                    const own = professionals.find(p => p.id.toString() === selectedProfessional);
-                                    return own ? `${own.full_name} (${own.specialty})` : 'Unknown professional';
-                                })()}
+                            {isStaffLoading ? 'Loading staff...' : (() => {
+                                const own = professionals.find(p => p.id.toString() === selectedProfessional);
+                                return own ? `${own.full_name} (${own.specialty})` : 'Unknown professional';
+                            })()}
                         </div>
                     ) : (
                         <select
                             value={selectedProfessional}
                             onChange={(e) => setSelectedProfessional(e.target.value)}
                             disabled={isStaffLoading || isDataLoading}
-                            className="rounded-full border border-pharmacy-ink/20 bg-white px-4 py-2 text-sm text-pharmacy-ink shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold disabled:opacity-50"
+                            className="rounded-full border border-pharmacy-ink/20 bg-white px-4 py-2 text-sm text-pharmacy-ink shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold disabled:opacity-50 font-medium"
                         >
-                            {isStaffLoading ? <option>Loading staff...</option> : professionals.map((prof) => (
+                            <option value="ALL">General (All Rooms & Doctors)</option>
+                            {isStaffLoading ? <option disabled>Loading staff...</option> : professionals.map((prof) => (
                                 <option key={prof.id} value={prof.id}>{prof.full_name} ({prof.specialty})</option>
                             ))}
                         </select>
                     )}
-                    <button onClick={() => setIsModalOpen(true)} className="rounded-full bg-pharmacy-gold px-5 py-2.5 text-sm font-semibold text-pharmacy-green transition hover:bg-pharmacy-gold-dark hover:text-white">+ New appointment</button>
+                    <button onClick={() => setIsModalOpen(true)} className="rounded-full bg-pharmacy-gold px-5 py-2.5 text-sm font-semibold text-pharmacy-green shadow-md hover:bg-pharmacy-gold-dark hover:text-white transition-all">+ New appointment</button>
                 </div>
             </header>
 
@@ -351,10 +402,10 @@ export default function Calendar() {
                         <p className="text-pharmacy-muted animate-pulse font-medium">Syncing Malta databases...</p>
                     </div>
                 ) : (
-                    <div className="flex flex-col gap-6">
-                        <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-pharmacy-cream-dark pb-3 gap-4">
+                    <div className="flex flex-col gap-6 h-full">
+                        <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-pharmacy-cream-dark pb-3 gap-4 shrink-0">
                             <div className="flex items-center gap-6">
-                                <h2 className="font-display text-xl text-pharmacy-ink">Weekly availability</h2>
+                                <h2 className="font-display text-xl text-pharmacy-ink">{selectedProfessional === 'ALL' ? 'General Clinic Schedule' : 'Weekly availability'}</h2>
                                 
                                 <div className="flex items-center bg-white rounded-lg border border-pharmacy-ink/20 shadow-sm overflow-hidden h-8">
                                     <button onClick={() => setCurrentWeekStart(prev => prev.minus({ weeks: 1 }))} className="px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink text-xs font-bold h-full flex items-center gap-1">
@@ -386,93 +437,84 @@ export default function Calendar() {
                         </div>
 
                         {viewMode === 'list' ? (
-                            <div className="flex flex-col md:flex-row gap-8">
-                                <div className="flex-1 md:border-r border-dashed border-pharmacy-ink/20 md:pr-8">
-                                    {Object.keys(groupedAvailabilities).length === 0 ? (
-                                        <p className="text-sm text-pharmacy-muted">No schedules configured for this professional.</p>
-                                    ) : (
-                                        <div className="space-y-6">
-                                            {Object.keys(groupedAvailabilities).map(Number).sort().map((sqlDayIndex) => {
-                                                const uiDayIndex = sqlDayIndex === 0 ? 6 : sqlDayIndex - 1;
-                                                return (
-                                                    <div key={sqlDayIndex} className="border-b border-dotted border-pharmacy-ink/15 last:border-0 pb-6 last:pb-0">
-                                                        <h3 className="font-display text-lg text-pharmacy-ink mb-3">{DAYS_OF_WEEK[uiDayIndex]}</h3>
-                                                        <div className="flex flex-col gap-3">
-                                                            {groupedAvailabilities[sqlDayIndex].map((avail) => {
-                                                                const startH = parseInt(avail.start_time.split(':')[0], 10);
-                                                                const isMorning = startH < 14;
-                                                                return (
-                                                                    <div key={avail.id} className="flex items-center">
-                                                                        <span className={`w-24 text-[10px] font-bold uppercase tracking-[0.15em] ${isMorning ? 'text-emerald-600' : 'text-pharmacy-gold-dark'}`}>
-                                                                            {isMorning ? 'Morning' : 'Afternoon'}
-                                                                        </span>
-                                                                        <span className="text-sm font-medium text-pharmacy-ink">
-                                                                            {formatTime(avail.start_time)} - {formatTime(avail.end_time)}
-                                                                        </span>
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    </div>
-                                                );
-                                            })}
+                            selectedProfessional === 'ALL' ? (
+                                <div className="flex flex-col md:flex-row gap-8 pb-8">
+                                    <div className="flex-1 md:border-r border-dashed border-pharmacy-ink/20 md:pr-8">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <h3 className="font-display text-lg text-pharmacy-ink">Room 1 Appointments</h3>
+                                            <span className="text-xs font-semibold text-pharmacy-muted bg-pharmacy-cream-dark px-2 py-1 rounded">{appointments.filter(a => a.room_number === 1 && a.status !== 'cancelled').length} active</span>
                                         </div>
-                                    )}
-                                </div>
-
-                                <div className="flex-1 rounded-lg bg-transparent h-fit">
-                                    <div className="flex items-center justify-between mb-3">
-                                        <h3 className="font-display text-lg text-pharmacy-ink">Booked appointments</h3>
-                                        <span className="text-xs font-semibold text-pharmacy-muted">{appointments.filter(a => a.status !== 'cancelled').length} active</span>
-                                    </div>
-                                    {appointments.filter(a => a.status !== 'cancelled').length === 0 ? (
-                                        <p className="text-sm text-pharmacy-muted">No active appointments booked for this week.</p>
-                                    ) : (
                                         <ul className="space-y-3">
-                                            {appointments.filter(a => a.status !== 'cancelled').map((appt) => {
-                                                const apptTime = DateTime.fromISO(appt.start_time_utc, { zone: 'Europe/Malta' });
-                                                const uiDayIndex = apptTime.weekday === 7 ? 6 : apptTime.weekday - 1;
-
-                                                return (
-                                                    <li key={appt.id} className="text-sm bg-white p-4 rounded-xl border border-pharmacy-ink/10 shadow-sm flex flex-col gap-2">
-                                                        <div className="flex justify-between items-start gap-3">
-                                                            <div>
-                                                                <div className="flex items-baseline gap-2">
-                                                                    <span className="font-bold text-pharmacy-ink">{appt.client_name}</span>
-                                                                    <span className="text-xs font-mono text-pharmacy-muted">{formatDisplayPhone(appt.client_phone)}</span>
-                                                                </div>
-                                                                <div className="text-xs text-pharmacy-muted mt-0.5">
-                                                                    {DAYS_OF_WEEK[uiDayIndex]} · {apptTime.toFormat('HH:mm')}
-                                                                </div>
-                                                            </div>
-                                                            <span className="text-[10px] font-bold uppercase tracking-wider text-pharmacy-ink bg-pharmacy-cream-dark border border-pharmacy-ink/10 px-2.5 py-1.5 rounded-md shrink-0">Room {appt.room_number}</span>
-                                                        </div>
-                                                        <div className="flex gap-4 mt-2 pt-3 border-t border-dashed border-pharmacy-ink/10">
-                                                            <button
-                                                                onClick={() => handleReschedule(appt)}
-                                                                disabled={actionLoadingId === appt.id}
-                                                                className="text-xs font-bold text-pharmacy-gold-dark hover:text-pharmacy-gold transition-colors disabled:opacity-50 uppercase tracking-wide"
-                                                            >
-                                                                Reschedule
-                                                            </button>
-                                                            <button
-                                                                onClick={() => handleCancelAppointment(appt.id)}
-                                                                disabled={actionLoadingId === appt.id}
-                                                                className="text-xs font-bold text-red-700/80 hover:text-red-700 transition-colors disabled:opacity-50 uppercase tracking-wide"
-                                                            >
-                                                                {actionLoadingId === appt.id ? '...' : 'Cancel'}
-                                                            </button>
-                                                        </div>
-                                                    </li>
-                                                );
-                                            })}
+                                            {appointments.filter(a => a.room_number === 1 && a.status !== 'cancelled').length === 0 
+                                                ? <p className="text-sm text-pharmacy-muted">No appointments booked in Room 1.</p> 
+                                                : appointments.filter(a => a.room_number === 1 && a.status !== 'cancelled').map(renderAppointmentCard)}
                                         </ul>
-                                    )}
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <h3 className="font-display text-lg text-pharmacy-ink">Room 2 Appointments</h3>
+                                            <span className="text-xs font-semibold text-pharmacy-muted bg-pharmacy-cream-dark px-2 py-1 rounded">{appointments.filter(a => a.room_number === 2 && a.status !== 'cancelled').length} active</span>
+                                        </div>
+                                        <ul className="space-y-3">
+                                            {appointments.filter(a => a.room_number === 2 && a.status !== 'cancelled').length === 0 
+                                                ? <p className="text-sm text-pharmacy-muted">No appointments booked in Room 2.</p> 
+                                                : appointments.filter(a => a.room_number === 2 && a.status !== 'cancelled').map(renderAppointmentCard)}
+                                        </ul>
+                                    </div>
                                 </div>
-                            </div>
+                            ) : (
+                                <div className="flex flex-col md:flex-row gap-8 pb-8">
+                                    <div className="flex-1 md:border-r border-dashed border-pharmacy-ink/20 md:pr-8">
+                                        {Object.keys(groupedAvailabilities).length === 0 ? (
+                                            <p className="text-sm text-pharmacy-muted">No schedules configured for this professional.</p>
+                                        ) : (
+                                            <div className="space-y-6">
+                                                {Object.keys(groupedAvailabilities).map(Number).sort().map((sqlDayIndex) => {
+                                                    const uiDayIndex = sqlDayIndex === 0 ? 6 : sqlDayIndex - 1;
+                                                    return (
+                                                        <div key={sqlDayIndex} className="border-b border-dotted border-pharmacy-ink/15 last:border-0 pb-6 last:pb-0">
+                                                            <h3 className="font-display text-lg text-pharmacy-ink mb-3">{DAYS_OF_WEEK[uiDayIndex]}</h3>
+                                                            <div className="flex flex-col gap-3">
+                                                                {groupedAvailabilities[sqlDayIndex].map((avail) => {
+                                                                    const startH = parseInt(avail.start_time.split(':')[0], 10);
+                                                                    const isMorning = startH < 14;
+                                                                    return (
+                                                                        <div key={avail.id} className="flex items-center">
+                                                                            <span className={`w-24 text-[10px] font-bold uppercase tracking-[0.15em] ${isMorning ? 'text-emerald-600' : 'text-pharmacy-gold-dark'}`}>
+                                                                                {isMorning ? 'Morning' : 'Afternoon'}
+                                                                            </span>
+                                                                            <span className="text-sm font-medium text-pharmacy-ink">
+                                                                                {formatTime(avail.start_time)} - {formatTime(avail.end_time)}
+                                                                            </span>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                        </div>
+                                                    );
+                                                })}
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    <div className="flex-1 rounded-lg bg-transparent h-fit">
+                                        <div className="flex items-center justify-between mb-3">
+                                            <h3 className="font-display text-lg text-pharmacy-ink">Booked appointments</h3>
+                                            <span className="text-xs font-semibold text-pharmacy-muted">{appointments.filter(a => a.status !== 'cancelled').length} active</span>
+                                        </div>
+                                        {appointments.filter(a => a.status !== 'cancelled').length === 0 ? (
+                                            <p className="text-sm text-pharmacy-muted">No active appointments booked for this week.</p>
+                                        ) : (
+                                            <ul className="space-y-3">
+                                                {appointments.filter(a => a.status !== 'cancelled').map(renderAppointmentCard)}
+                                            </ul>
+                                        )}
+                                    </div>
+                                </div>
+                            )
                         ) : (
-                            <div className="flex flex-col gap-3">
-                                <div className="flex items-center justify-end gap-2">
+                            <div className="flex flex-col gap-3 pb-8 h-full">
+                                <div className="flex items-center justify-end gap-2 shrink-0">
                                     <label className="text-sm font-medium text-pharmacy-muted">Day:</label>
                                     <select
                                         value={gridSelectedDay}
@@ -490,70 +532,158 @@ export default function Calendar() {
                                     </select>
                                 </div>
 
-                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                                    {[
-                                        { label: 'Morning', slots: morningSlots },
-                                        { label: 'Afternoon', slots: afternoonSlots },
-                                    ].map(({ label, slots }) => {
-                                        const currentDate = currentWeekStart.plus({ days: gridSelectedDay });
-                                        
-                                        return (
-                                            <div key={label} className="overflow-x-auto rounded-lg border border-pharmacy-ink/10 bg-white shadow-sm">
-                                                <table className="w-full text-sm text-left border-collapse">
-                                                    <thead className="bg-pharmacy-cream-dark text-pharmacy-ink">
-                                                        <tr>
-                                                            <th className="border-b border-r border-pharmacy-ink/10 px-4 py-3 font-semibold text-center w-24">Time</th>
-                                                            <th className="border-b border-pharmacy-ink/10 px-4 py-3 font-semibold text-center">
-                                                                {DAYS_OF_WEEK[gridSelectedDay]} - {label}
-                                                                <span className="ml-2 font-normal text-pharmacy-muted">({currentDate.toFormat('dd/MM/yyyy')})</span>
-                                                            </th>
-                                                        </tr>
-                                                    </thead>
-                                                    <tbody>
-                                                        {slots.map(({ hour, minute }) => {
-                                                            const details = getSlotDetails(gridSelectedDay, hour, minute);
-                                                            
-                                                            let cellClass = '';
-                                                            let cellContent: React.ReactNode = null;
+                                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1">
+                                    {selectedProfessional === 'ALL' ? (
+                                        [
+                                            { label: 'Room 1', roomNumber: 1, slots: FULL_DAY_SLOTS },
+                                            { label: 'Room 2', roomNumber: 2, slots: FULL_DAY_SLOTS },
+                                        ].map(({ label, roomNumber, slots }) => {
+                                            const currentDate = currentWeekStart.plus({ days: gridSelectedDay });
+                                            
+                                            return (
+                                                <div key={label} className="overflow-x-auto rounded-lg border border-pharmacy-ink/10 bg-white shadow-sm flex flex-col h-[60vh] lg:h-auto">
+                                                    <table className="w-full text-sm text-left border-collapse flex-1">
+                                                        <thead className="bg-pharmacy-cream-dark text-pharmacy-ink sticky top-0 z-10 shadow-sm">
+                                                            <tr>
+                                                                <th className="border-b border-r border-pharmacy-ink/10 px-4 py-3 font-semibold text-center w-24">Time</th>
+                                                                <th className="border-b border-pharmacy-ink/10 px-4 py-3 font-semibold text-center">
+                                                                    {DAYS_OF_WEEK[gridSelectedDay]} - {label}
+                                                                </th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {slots.map(({ hour, minute }) => {
+                                                                const details = getSlotDetails(gridSelectedDay, hour, minute, roomNumber);
+                                                                const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+                                                                
+                                                                let cellClass = '';
+                                                                let cellContent: React.ReactNode = null;
+                                                                let interactionProps = {};
 
-                                                            if (details.status === 'Booked') {
-                                                                cellClass = 'bg-emerald-50 border-emerald-200 text-emerald-800';
-                                                                cellContent = (
-                                                                    <div className="flex items-center justify-between w-full px-1">
-                                                                        <div className="flex items-baseline gap-1.5 truncate">
-                                                                            <span className="font-bold text-[11px] text-emerald-900 truncate">{details.appointment!.client_name}</span>
+                                                                if (details.status === 'Booked') {
+                                                                    const prof = professionals.find(p => p.id === details.appointment!.professional_id);
+                                                                    cellClass = 'bg-emerald-50 border-emerald-200 text-emerald-800';
+                                                                    cellContent = (
+                                                                        <div className="flex flex-col items-start justify-center w-full px-2 leading-tight">
+                                                                            <span className="font-bold text-[11px] text-emerald-900 truncate w-full">{details.appointment!.client_name}</span>
                                                                             <span className="font-mono text-[10px] text-emerald-700/80">{formatDisplayPhone(details.appointment!.client_phone)}</span>
+                                                                            {prof && <span className="font-bold text-[9px] uppercase tracking-wider text-pharmacy-gold-dark mt-0.5">{prof.full_name}</span>}
                                                                         </div>
-                                                                        <span className="font-bold text-[9px] uppercase tracking-wider text-emerald-900 bg-white/60 px-1.5 py-0.5 rounded shrink-0">Rm {details.appointment!.room_number}</span>
-                                                                    </div>
-                                                                );
-                                                            } else if (details.status === 'Holiday') {
-                                                                cellClass = 'bg-purple-50 border-purple-200 text-purple-600 opacity-90';
-                                                                cellContent = <span className="font-bold text-xs tracking-[0.1em] uppercase">{details.label}</span>;
-                                                            } else if (details.status === 'Available') {
-                                                                cellClass = 'bg-white border-emerald-100 text-emerald-700';
-                                                            } else {
-                                                                cellClass = 'bg-pharmacy-cream border-pharmacy-ink/5 text-pharmacy-muted';
-                                                            }
+                                                                    );
+                                                                    interactionProps = { className: `border-b px-2 py-1 transition-colors text-xs ${cellClass}` };
+                                                                } else if (details.status === 'Holiday') {
+                                                                    cellClass = 'bg-purple-50 border-purple-200 text-purple-600 opacity-90';
+                                                                    cellContent = <span className="font-bold text-xs tracking-[0.1em] uppercase">{details.label}</span>;
+                                                                    interactionProps = { className: `border-b px-2 py-1 transition-colors text-xs ${cellClass}` };
+                                                                } else if (details.status === 'Available') {
+                                                                    cellClass = 'bg-white border-emerald-100 text-emerald-700 hover:bg-pharmacy-gold/15 cursor-pointer';
+                                                                    interactionProps = { 
+                                                                        className: `border-b px-2 py-1 transition-colors text-xs ${cellClass}`,
+                                                                        onClick: () => handleEmptySlotClick(currentDate, timeString, roomNumber.toString())
+                                                                    };
+                                                                } else {
+                                                                    cellClass = 'bg-pharmacy-cream border-pharmacy-ink/5 text-pharmacy-muted hover:bg-pharmacy-gold/15 cursor-pointer';
+                                                                    interactionProps = { 
+                                                                        className: `border-b px-2 py-1 transition-colors text-xs ${cellClass}`,
+                                                                        onClick: () => handleEmptySlotClick(currentDate, timeString, roomNumber.toString())
+                                                                    };
+                                                                }
 
-                                                            return (
-                                                                <tr key={`${hour}-${minute}`}>
-                                                                    <td className="border-b border-r border-pharmacy-ink/10 px-4 py-2 text-center text-pharmacy-muted font-medium bg-pharmacy-cream/40">
-                                                                        {hour.toString().padStart(2, '0')}:{minute.toString().padStart(2, '0')}
-                                                                    </td>
-                                                                    <td className={`border-b px-2 py-1 transition-colors text-xs ${cellClass}`}>
-                                                                        <div className="w-full flex items-center justify-center h-full min-h-[24px]">
-                                                                            {cellContent}
+                                                                return (
+                                                                    <tr key={`${hour}-${minute}`}>
+                                                                        <td className="border-b border-r border-pharmacy-ink/10 px-4 py-2 text-center text-pharmacy-muted font-medium bg-pharmacy-cream/40">
+                                                                            {timeString}
+                                                                        </td>
+                                                                        <td {...interactionProps}>
+                                                                            <div className="w-full flex items-center justify-center h-full min-h-[36px]">
+                                                                                {cellContent}
+                                                                            </div>
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            );
+                                        })
+                                    ) : (
+                                        [
+                                            { label: 'Morning', slots: morningSlots },
+                                            { label: 'Afternoon', slots: afternoonSlots },
+                                        ].map(({ label, slots }) => {
+                                            const currentDate = currentWeekStart.plus({ days: gridSelectedDay });
+                                            
+                                            return (
+                                                <div key={label} className="overflow-x-auto rounded-lg border border-pharmacy-ink/10 bg-white shadow-sm flex flex-col h-[50vh] lg:h-auto">
+                                                    <table className="w-full text-sm text-left border-collapse flex-1">
+                                                        <thead className="bg-pharmacy-cream-dark text-pharmacy-ink sticky top-0 z-10 shadow-sm">
+                                                            <tr>
+                                                                <th className="border-b border-r border-pharmacy-ink/10 px-4 py-3 font-semibold text-center w-24">Time</th>
+                                                                <th className="border-b border-pharmacy-ink/10 px-4 py-3 font-semibold text-center">
+                                                                    {DAYS_OF_WEEK[gridSelectedDay]} - {label}
+                                                                    <span className="ml-2 font-normal text-pharmacy-muted">({currentDate.toFormat('dd/MM/yyyy')})</span>
+                                                                </th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            {slots.map(({ hour, minute }) => {
+                                                                const details = getSlotDetails(gridSelectedDay, hour, minute);
+                                                                const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+                                                                
+                                                                let cellClass = '';
+                                                                let cellContent: React.ReactNode = null;
+                                                                let interactionProps = {};
+
+                                                                if (details.status === 'Booked') {
+                                                                    cellClass = 'bg-emerald-50 border-emerald-200 text-emerald-800';
+                                                                    cellContent = (
+                                                                        <div className="flex items-center justify-between w-full px-1">
+                                                                            <div className="flex items-baseline gap-1.5 truncate">
+                                                                                <span className="font-bold text-[11px] text-emerald-900 truncate">{details.appointment!.client_name}</span>
+                                                                                <span className="font-mono text-[10px] text-emerald-700/80">{formatDisplayPhone(details.appointment!.client_phone)}</span>
+                                                                            </div>
+                                                                            <span className="font-bold text-[9px] uppercase tracking-wider text-emerald-900 bg-white/60 px-1.5 py-0.5 rounded shrink-0">Rm {details.appointment!.room_number}</span>
                                                                         </div>
-                                                                    </td>
-                                                                </tr>
-                                                            );
-                                                        })}
-                                                    </tbody>
-                                                </table>
-                                            </div>
-                                        );
-                                    })}
+                                                                    );
+                                                                    interactionProps = { className: `border-b px-2 py-1 transition-colors text-xs ${cellClass}` };
+                                                                } else if (details.status === 'Holiday') {
+                                                                    cellClass = 'bg-purple-50 border-purple-200 text-purple-600 opacity-90';
+                                                                    cellContent = <span className="font-bold text-xs tracking-[0.1em] uppercase">{details.label}</span>;
+                                                                    interactionProps = { className: `border-b px-2 py-1 transition-colors text-xs ${cellClass}` };
+                                                                } else if (details.status === 'Available') {
+                                                                    cellClass = 'bg-white border-emerald-100 text-emerald-700 hover:bg-pharmacy-gold/15 cursor-pointer';
+                                                                    interactionProps = { 
+                                                                        className: `border-b px-2 py-1 transition-colors text-xs ${cellClass}`,
+                                                                        onClick: () => handleEmptySlotClick(currentDate, timeString)
+                                                                    };
+                                                                } else {
+                                                                    cellClass = 'bg-pharmacy-cream border-pharmacy-ink/5 text-pharmacy-muted hover:bg-pharmacy-gold/15 cursor-pointer';
+                                                                    interactionProps = { 
+                                                                        className: `border-b px-2 py-1 transition-colors text-xs ${cellClass}`,
+                                                                        onClick: () => handleEmptySlotClick(currentDate, timeString)
+                                                                    };
+                                                                }
+
+                                                                return (
+                                                                    <tr key={`${hour}-${minute}`}>
+                                                                        <td className="border-b border-r border-pharmacy-ink/10 px-4 py-2 text-center text-pharmacy-muted font-medium bg-pharmacy-cream/40">
+                                                                            {timeString}
+                                                                        </td>
+                                                                        <td {...interactionProps}>
+                                                                            <div className="w-full flex items-center justify-center h-full min-h-[24px]">
+                                                                                {cellContent}
+                                                                            </div>
+                                                                        </td>
+                                                                    </tr>
+                                                                );
+                                                            })}
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            );
+                                        })
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -568,6 +698,9 @@ export default function Calendar() {
                 selectedProfessionalId={selectedProfessional}
                 professionals={professionals}
                 appointmentToEdit={appointmentToEdit}
+                initialDate={prefilledDate}
+                initialTime={prefilledTime}
+                initialRoom={prefilledRoom}
             />
         </div>
     );

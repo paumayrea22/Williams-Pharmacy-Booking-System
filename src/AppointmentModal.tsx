@@ -38,17 +38,30 @@ interface AppointmentModalProps {
     onSuccess: () => void;
     selectedProfessionalId: string;
     professionals: Professional[];
-    appointmentToEdit?: Appointment | null; // Existing appointment to prefill the form for rescheduling
+    appointmentToEdit?: Appointment | null;
+    initialDate?: DateTime | null; // Deep-linked temporal prefill
+    initialTime?: string[]; // Deep-linked slot prefill
+    initialRoom?: string; // Deep-linked physical resource prefill
 }
 
-export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedProfessionalId, professionals, appointmentToEdit }: AppointmentModalProps) {
-    // Sealed role read from app_metadata, never user_metadata
+const extractNameAndNote = (fullName: string) => {
+    const match = fullName.match(/^(.*?)(?:\s*\(([^)]+)\))?$/);
+    return {
+        name: match ? match[1].trim() : fullName,
+        note: match && match[2] ? match[2].trim() : ''
+    };
+};
+
+export default function AppointmentModal({ 
+    isOpen, onClose, onSuccess, selectedProfessionalId, professionals, appointmentToEdit, initialDate, initialTime, initialRoom 
+}: AppointmentModalProps) {
     const { role, username } = useAuth();
     const staffUsername = username ?? 'System';
 
     const [modalProfessionalId, setModalProfessionalId] = useState(selectedProfessionalId);
     const [clientName, setClientName] = useState('');
     const [clientPhone, setClientPhone] = useState('');
+    const [appointmentNote, setAppointmentNote] = useState('');
     const [countryIso2, setCountryIso2] = useState(DEFAULT_COUNTRY_ISO2);
     const [roomNumber, setRoomNumber] = useState('1');
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -56,9 +69,9 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
 
     const [activePanel, setActivePanel] = useState<'NONE' | 'DATE' | 'TIME'>('NONE');
     const [confirmedDate, setConfirmedDate] = useState<DateTime | null>(null);
-    const [confirmedTime, setConfirmedTime] = useState<string | null>(null);
+    const [confirmedTime, setConfirmedTime] = useState<string[]>([]);
     const [tempDate, setTempDate] = useState<DateTime | null>(null);
-    const [tempTime, setTempTime] = useState<string | null>(null);
+    const [tempTime, setTempTime] = useState<string[]>([]);
 
     const [monthAvailabilities, setMonthAvailabilities] = useState<Availability[]>([]);
     const [monthAppointments, setMonthAppointments] = useState<Appointment[]>([]);
@@ -66,7 +79,6 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
     
     const [currentMonth, setCurrentMonth] = useState<DateTime>(DateTime.local({ zone: 'Europe/Malta' }));
 
-    // Initialization effect: prefills the form when editing, resets it for a new booking
     useEffect(() => {
         if (!isOpen) return;
 
@@ -75,45 +87,69 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
         setCurrentMonth(DateTime.local({ zone: 'Europe/Malta' }));
 
         if (appointmentToEdit) {
-            // Prefill the form with the existing appointment's data
             setModalProfessionalId(appointmentToEdit.professional_id.toString());
-            setClientName(appointmentToEdit.client_name);
+            setRoomNumber(appointmentToEdit.room_number.toString());
 
-            // Legacy records were stored as raw digits with an implicit Malta prefix
+            const parsedData = extractNameAndNote(appointmentToEdit.client_name);
+            setClientName(parsedData.name);
+            setAppointmentNote(parsedData.note);
+
             const { iso2, localNumber } = splitStoredPhone(appointmentToEdit.client_phone);
             setCountryIso2(iso2);
             setClientPhone(localNumber);
 
-            setRoomNumber(appointmentToEdit.room_number.toString());
+            const oldStart = DateTime.fromISO(appointmentToEdit.start_time_utc, { zone: 'Europe/Malta' });
+            const oldEnd = DateTime.fromISO(appointmentToEdit.end_time_utc, { zone: 'Europe/Malta' });
+            
+            setConfirmedDate(oldStart);
+            setCurrentMonth(oldStart);
 
-            const oldDate = DateTime.fromISO(appointmentToEdit.start_time_utc, { zone: 'Europe/Malta' });
-            setConfirmedDate(oldDate);
-            setConfirmedTime(oldDate.toFormat('HH:mm'));
-            setCurrentMonth(oldDate);
-        } else {
-            // Empty form by default for new bookings
-            setModalProfessionalId(selectedProfessionalId);
-            setConfirmedDate(null);
-            setConfirmedTime(null);
+            const diffMinutes = oldEnd.diff(oldStart, 'minutes').minutes;
+            const currentProfessional = professionals.find(p => p.id === appointmentToEdit.professional_id);
+            const duration = currentProfessional ? currentProfessional.default_duration_minutes : 15;
+            
+            const slotsCount = Math.max(1, Math.round(diffMinutes / duration));
+            const times = [];
+            for (let i = 0; i < slotsCount; i++) {
+                times.push(oldStart.plus({ minutes: i * duration }).toFormat('HH:mm'));
+            }
+            setConfirmedTime(times);
+            setTempTime(times);
+
+        } else if (initialDate && initialTime && initialTime.length > 0) {
+            // Deep-link architecture: Bypass configuration panels entirely
+            setModalProfessionalId(selectedProfessionalId === 'ALL' ? (professionals[0]?.id.toString() || '') : selectedProfessionalId);
+            setConfirmedDate(initialDate);
+            setConfirmedTime(initialTime);
+            setTempDate(initialDate);
+            setTempTime(initialTime);
+            setCurrentMonth(initialDate);
             setClientName('');
             setClientPhone('');
+            setAppointmentNote('');
+            setCountryIso2(DEFAULT_COUNTRY_ISO2);
+            setRoomNumber(initialRoom || '1');
+            setActivePanel('NONE');
+        } else {
+            setModalProfessionalId(selectedProfessionalId === 'ALL' ? (professionals[0]?.id.toString() || '') : selectedProfessionalId);
+            setConfirmedDate(null);
+            setConfirmedTime([]);
+            setClientName('');
+            setClientPhone('');
+            setAppointmentNote('');
             setCountryIso2(DEFAULT_COUNTRY_ISO2);
             setRoomNumber('1');
+            setTempTime([]);
         }
-        setTempDate(null);
-        setTempTime(null);
 
-        // Doctors are locked to their own professional record, matched by username suffix
         if (role === 'doctor' && username) {
             const doctorName = username.split('-')[1];
             const matchingProf = professionals.find(p => p.full_name.includes(doctorName));
             if (matchingProf) setModalProfessionalId(matchingProf.id.toString());
         }
-    }, [isOpen, selectedProfessionalId, professionals, appointmentToEdit, role, username]);
+    }, [isOpen, selectedProfessionalId, professionals, appointmentToEdit, role, username, initialDate, initialTime, initialRoom]);
 
-    // Strictly blocks Malta holidays and Sundays as per business logic invariants
     const isHolidayBlocked = (dateObj: DateTime): boolean => {
-        if (dateObj.weekday === 7) return true; // 7 represents Sunday in Luxon
         const dateISO = dateObj.toISODate();
         if (!dateISO) return false;
         return getMaltaHolidayName(dateISO) !== null;
@@ -165,13 +201,11 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
             while (currentSlot < endTime) {
                 const timeString = currentSlot.toFormat('HH:mm');
                 const isBooked = monthAppointments.some(appt => {
-                    const apptDate = DateTime.fromISO(appt.start_time_utc, { zone: 'Europe/Malta' });
-                    // Ignore the current appointment when in edit mode to avoid self-blocking
-                    if (appointmentToEdit && appt.id === appointmentToEdit.id) return false;
+                    const apptStart = DateTime.fromISO(appt.start_time_utc, { zone: 'Europe/Malta' });
+                    const apptEnd = DateTime.fromISO(appt.end_time_utc, { zone: 'Europe/Malta' });
                     
-                    return apptDate.toISODate() === selectedDateString &&
-                           apptDate.toFormat('HH:mm') === timeString &&
-                           appt.status !== 'cancelled';
+                    if (appointmentToEdit && appt.id === appointmentToEdit.id) return false;
+                    return appt.status !== 'cancelled' && currentSlot >= apptStart && currentSlot < apptEnd;
                 });
 
                 generatedSlots.push({ time: timeString, isBooked });
@@ -187,17 +221,48 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
 
     const handlePhoneInput = (e: React.ChangeEvent<HTMLInputElement>) => {
         const onlyNumbers = e.target.value.replace(/\D/g, '');
-        if (onlyNumbers.length <= 9) setClientPhone(onlyNumbers);
+        if (onlyNumbers.length <= 15) setClientPhone(onlyNumbers);
     };
 
-    // Switching the professional invalidates the previously picked date/time, since availability differs per professional
-    const handleProfessionalChange = (newProfessionalId: string) => {
-        setModalProfessionalId(newProfessionalId);
-        setConfirmedDate(null);
-        setConfirmedTime(null);
-        setTempDate(null);
-        setTempTime(null);
-        setActivePanel('NONE');
+    const handleNoteInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value;
+        setAppointmentNote(value);
+        
+        if (!value.trim()) {
+            if (tempTime.length > 1) setTempTime([tempTime[0]]);
+            if (confirmedTime.length > 1) setConfirmedTime([confirmedTime[0]]);
+        }
+    };
+
+    const handleTimeSelection = (time: string) => {
+        if (!appointmentNote.trim()) {
+            setTempTime([time]);
+            return;
+        }
+
+        if (tempTime.includes(time)) {
+            setTempTime(tempTime.filter(t => t !== time));
+            return;
+        }
+
+        if (tempTime.length === 0) {
+            setTempTime([time]);
+        } else if (tempTime.length === 1) {
+            const currentProfessional = professionals.find(p => p.id.toString() === modalProfessionalId);
+            const duration = currentProfessional ? currentProfessional.default_duration_minutes : 15;
+            
+            const time1 = DateTime.fromFormat(tempTime[0], 'HH:mm');
+            const time2 = DateTime.fromFormat(time, 'HH:mm');
+            const diff = Math.abs(time1.diff(time2, 'minutes').minutes);
+            
+            if (diff === duration) {
+                setTempTime([...tempTime, time].sort());
+            } else {
+                setTempTime([time]); 
+            }
+        } else {
+            setTempTime([time]); 
+        }
     };
 
     const handleFormSubmit = async (e: React.FormEvent) => {
@@ -205,7 +270,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
         setErrorMessage('');
         setIsSubmitting(true);
 
-        if (!clientName.trim() || clientPhone.length < 8 || !confirmedDate || !confirmedTime) {
+        if (!clientName.trim() || clientPhone.length < 8 || !confirmedDate || confirmedTime.length === 0) {
             setErrorMessage('All fields are required. Phone must be at least 8 digits.');
             setIsSubmitting(false);
             return;
@@ -215,8 +280,9 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
         const durationMinutes = currentProfessional ? currentProfessional.default_duration_minutes : 15;
 
         const dateString = confirmedDate.toISODate();
-        const startDateTime = DateTime.fromISO(`${dateString}T${confirmedTime}`, { zone: 'Europe/Malta' });
-        const endDateTime = startDateTime.plus({ minutes: durationMinutes });
+        const startDateTime = DateTime.fromISO(`${dateString}T${confirmedTime[0]}`, { zone: 'Europe/Malta' });
+        const durationMultiplier = confirmedTime.length;
+        const endDateTime = startDateTime.plus({ minutes: durationMinutes * durationMultiplier });
 
         if (startDateTime < DateTime.local({ zone: 'Europe/Malta' })) {
             setErrorMessage('Validation Error: Cannot book an appointment in the past.');
@@ -224,10 +290,15 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
             return;
         }
 
+        const finalClientName = appointmentNote.trim() 
+            ? `${clientName.trim()} (${appointmentNote.trim()})`
+            : clientName.trim();
+
+        const selectedDialCode = findCountryByIso2(countryIso2).dialCode;
+
         let isRollbackNeeded = false;
 
         try {
-            // Phase 1: If this is a modification, temporarily cancel the original slot
             if (appointmentToEdit) {
                 const { error: cancelError } = await supabase
                     .from('appointments')
@@ -238,19 +309,16 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                 isRollbackNeeded = true;
             }
 
-            // Phase 2: Execute the secure RPC with the new booking data
-            const selectedDialCode = findCountryByIso2(countryIso2).dialCode;
             const { error: rpcError } = await supabase.rpc('book_appointment_secure', {
                 p_professional_id: parseInt(modalProfessionalId),
                 p_room_number: parseInt(roomNumber),
-                p_client_name: clientName.trim(),
+                p_client_name: finalClientName,
                 p_client_phone: `${selectedDialCode} ${clientPhone}`,
                 p_start_time_utc: startDateTime.toUTC().toISO(),
                 p_end_time_utc: endDateTime.toUTC().toISO(),
                 p_staff_username: staffUsername
             });
 
-            // Phase 3: Rollback evaluation (revert changes if the RPC fails)
             if (rpcError) {
                 if (isRollbackNeeded && appointmentToEdit) {
                     await supabase
@@ -292,13 +360,12 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
             const endTime = DateTime.fromISO(`${selectedDateString}T${avail.end_time}`, { zone: 'Europe/Malta' });
             while (currentSlot < endTime) {
                 totalSlots++;
-                const timeString = currentSlot.toFormat('HH:mm');
                 const isBooked = monthAppointments.some(appt => {
-                    const apptDate = DateTime.fromISO(appt.start_time_utc, { zone: 'Europe/Malta' });
+                    const apptStart = DateTime.fromISO(appt.start_time_utc, { zone: 'Europe/Malta' });
+                    const apptEnd = DateTime.fromISO(appt.end_time_utc, { zone: 'Europe/Malta' });
+                    
                     if (appointmentToEdit && appt.id === appointmentToEdit.id) return false;
-                    return apptDate.toISODate() === selectedDateString &&
-                           apptDate.toFormat('HH:mm') === timeString &&
-                           appt.status !== 'cancelled';
+                    return appt.status !== 'cancelled' && currentSlot >= apptStart && currentSlot < apptEnd;
                 });
                 if (isBooked) bookedSlots++;
                 currentSlot = currentSlot.plus({ minutes: duration });
@@ -396,7 +463,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                             ) : (
                                 <select
                                     value={modalProfessionalId}
-                                    onChange={(e) => handleProfessionalChange(e.target.value)}
+                                    onChange={(e) => setModalProfessionalId(e.target.value)}
                                     className="w-full rounded-lg border border-pharmacy-ink/20 p-2 text-pharmacy-ink shadow-sm focus:border-pharmacy-gold focus:ring-2 focus:ring-pharmacy-gold/20"
                                 >
                                     {professionals.map(prof => (
@@ -446,6 +513,17 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                                 />
                             </div>
                         </div>
+                        
+                        <div>
+                            <label className="block text-sm font-semibold text-pharmacy-ink mb-1">Appointment Note (Optional)</label>
+                            <input
+                                type="text"
+                                value={appointmentNote}
+                                onChange={handleNoteInput}
+                                className="w-full rounded-lg border border-pharmacy-ink/20 p-2 shadow-sm focus:border-pharmacy-gold focus:ring-2 focus:ring-pharmacy-gold/20"
+                                placeholder="E.g. Blood test, Ear surgery"
+                            />
+                        </div>
 
                         <div className="grid grid-cols-2 gap-4">
                             <div>
@@ -466,7 +544,11 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                                     onClick={() => setActivePanel('TIME')}
                                     className={`w-full text-left rounded-lg border p-2 shadow-sm transition-colors disabled:bg-pharmacy-cream-dark disabled:text-pharmacy-muted disabled:cursor-not-allowed ${activePanel === 'TIME' ? 'border-pharmacy-gold ring-2 ring-pharmacy-gold/20 bg-pharmacy-gold/10' : 'border-pharmacy-ink/20 bg-white hover:bg-pharmacy-cream'}`}
                                 >
-                                    {confirmedTime ? confirmedTime : <span className={!confirmedDate ? 'text-pharmacy-muted' : 'text-pharmacy-muted'}>Select time...</span>}
+                                    {confirmedTime.length > 0 ? (
+                                        confirmedTime.length === 1 ? confirmedTime[0] : `${confirmedTime[0]} & ${confirmedTime[1]}`
+                                    ) : (
+                                        <span className={!confirmedDate ? 'text-pharmacy-muted' : 'text-pharmacy-muted'}>Select time...</span>
+                                    )}
                                 </button>
                             </div>
                         </div>
@@ -489,7 +571,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                             <button type="button" onClick={onClose} disabled={isSubmitting} className="text-sm font-semibold text-pharmacy-muted hover:text-pharmacy-ink transition">
                                 Cancel & Close
                             </button>
-                            <button type="submit" disabled={isSubmitting || !clientName || clientPhone.length < 8 || !confirmedDate || !confirmedTime} className="rounded-full bg-pharmacy-gold px-6 py-2.5 text-sm font-bold text-pharmacy-green shadow-md hover:bg-pharmacy-gold-dark hover:text-white disabled:bg-gray-300 disabled:text-white disabled:shadow-none transition-all">
+                            <button type="submit" disabled={isSubmitting || !clientName || clientPhone.length < 8 || !confirmedDate || confirmedTime.length === 0} className="rounded-full bg-pharmacy-gold px-6 py-2.5 text-sm font-bold text-pharmacy-green shadow-md hover:bg-pharmacy-gold-dark hover:text-white disabled:bg-gray-300 disabled:text-white disabled:shadow-none transition-all">
                                 {isSubmitting ? 'Saving...' : (appointmentToEdit ? 'Confirm Reschedule' : 'Confirm Appointment')}
                             </button>
                         </div>
@@ -513,7 +595,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                             <div className="mt-auto pt-4 border-t border-pharmacy-cream-dark flex justify-end shrink-0">
                                 <button
                                     type="button"
-                                    onClick={() => { if (tempDate) { setConfirmedDate(tempDate); setConfirmedTime(null); setActivePanel('NONE'); } }}
+                                    onClick={() => { if (tempDate) { setConfirmedDate(tempDate); setConfirmedTime([]); setActivePanel('NONE'); } }}
                                     disabled={!tempDate}
                                     className="bg-pharmacy-gold text-pharmacy-green px-6 py-2.5 rounded-full font-bold text-sm disabled:opacity-50 disabled:shadow-none shadow-md hover:bg-pharmacy-gold-dark hover:text-white transition-all"
                                 >
@@ -542,11 +624,11 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                                                 key={idx}
                                                 type="button"
                                                 disabled={slot.isBooked}
-                                                onClick={() => setTempTime(slot.time)}
+                                                onClick={() => handleTimeSelection(slot.time)}
                                                 className={`p-3 rounded-lg border-2 text-sm font-bold transition-all ${
                                                     slot.isBooked
                                                         ? 'bg-red-50 border-red-100 text-red-400 cursor-not-allowed line-through'
-                                                        : tempTime === slot.time
+                                                        : tempTime.includes(slot.time)
                                                             ? 'bg-pharmacy-gold border-pharmacy-gold text-pharmacy-green shadow-md transform scale-105'
                                                             : 'bg-white border-emerald-100 text-emerald-700 hover:border-pharmacy-gold hover:text-pharmacy-gold-dark hover:bg-pharmacy-gold/10'
                                                 }`}
@@ -561,8 +643,8 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                             <div className="mt-auto pt-4 border-t border-pharmacy-cream-dark flex justify-end shrink-0">
                                 <button
                                     type="button"
-                                    onClick={() => { if (tempTime) { setConfirmedTime(tempTime); setActivePanel('NONE'); } }}
-                                    disabled={!tempTime}
+                                    onClick={() => { if (tempTime.length > 0) { setConfirmedTime(tempTime); setActivePanel('NONE'); } }}
+                                    disabled={tempTime.length === 0}
                                     className="bg-pharmacy-gold text-pharmacy-green px-6 py-2.5 rounded-full font-bold text-sm disabled:opacity-50 disabled:shadow-none shadow-md hover:bg-pharmacy-gold-dark hover:text-white transition-all"
                                 >
                                     Save Time
