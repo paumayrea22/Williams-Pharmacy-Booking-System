@@ -325,7 +325,7 @@ export default function StaffManagement() {
                 <div className="border-b pb-2 border-pharmacy-cream-dark">
                     <h2 className="font-display text-lg text-pharmacy-ink">Malta Public Holidays</h2>
                     <p className="text-xs text-pharmacy-muted mt-0.5">
-                        Bookings are strictly blocked on these dates. The pharmacy permanently remains closed on Malta public holidays and Sundays.
+                        Bookings are strictly blocked on these dates. The pharmacy permanently remains closed on Malta public holidays.
                     </p>
                 </div>
 
@@ -339,9 +339,6 @@ export default function StaffManagement() {
                                             {DateTime.fromISO(holiday.date).toFormat('dd/MM/yyyy')}
                                         </span>
                                         <span className="text-pharmacy-muted">{holiday.name}</span>
-                                        <span className="ml-2 px-2 py-0.5 rounded-full font-bold bg-pharmacy-gold/15 text-pharmacy-gold-dark">
-                                            Holiday (Closed)
-                                        </span>
                                     </div>
                                 </li>
                             );

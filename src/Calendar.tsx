@@ -313,16 +313,9 @@ export default function Calendar() {
             <header className="flex flex-col gap-4 border-b border-pharmacy-cream-dark p-6 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                     <p className="text-xs font-semibold tracking-[0.2em] text-pharmacy-gold-dark uppercase mb-1">Appointment Management</p>
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                        <h1 className="font-display text-3xl text-pharmacy-ink">
-                            {currentWeekStart.hasSame(DateTime.local(), 'week') ? 'The week ahead' : `Week of ${currentWeekStart.toFormat('MMMM d')}`}
-                        </h1>
-                        <div className="flex items-center bg-white rounded-full border border-pharmacy-ink/20 shadow-sm overflow-hidden h-8">
-                            <button onClick={() => setCurrentWeekStart(prev => prev.minus({ weeks: 1 }))} className="px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink font-bold h-full">←</button>
-                            <button onClick={() => setCurrentWeekStart(DateTime.local({ zone: 'Europe/Malta' }).startOf('week'))} className="px-3 hover:bg-pharmacy-cream transition border-x border-pharmacy-ink/10 text-[10px] font-bold text-pharmacy-muted uppercase tracking-wider h-full">Today</button>
-                            <button onClick={() => setCurrentWeekStart(prev => prev.plus({ weeks: 1 }))} className="px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink font-bold h-full">→</button>
-                        </div>
-                    </div>
+                    <h1 className="font-display text-3xl text-pharmacy-ink">
+                        {currentWeekStart.hasSame(DateTime.local(), 'week') ? 'The week ahead' : `Week of ${currentWeekStart.toFormat('MMMM d')}`}
+                    </h1>
                 </div>
                 <div className="flex items-center gap-4">
                     {isDoctor ? (
@@ -357,8 +350,23 @@ export default function Calendar() {
                     </div>
                 ) : (
                     <div className="flex flex-col gap-6">
-                        <div className="flex items-center justify-between border-b border-pharmacy-cream-dark pb-3">
-                            <h2 className="font-display text-xl text-pharmacy-ink">Weekly availability</h2>
+                        <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-pharmacy-cream-dark pb-3 gap-4">
+                            <div className="flex items-center gap-6">
+                                <h2 className="font-display text-xl text-pharmacy-ink">Weekly availability</h2>
+                                
+                                <div className="flex items-center bg-white rounded-lg border border-pharmacy-ink/20 shadow-sm overflow-hidden h-8">
+                                    <button onClick={() => setCurrentWeekStart(prev => prev.minus({ weeks: 1 }))} className="px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink text-xs font-bold h-full flex items-center gap-1">
+                                        <span>←</span> Prev Week
+                                    </button>
+                                    <button onClick={() => setCurrentWeekStart(DateTime.local({ zone: 'Europe/Malta' }).startOf('week'))} className="px-3 hover:bg-pharmacy-cream transition border-x border-pharmacy-ink/10 text-[10px] font-bold text-pharmacy-muted uppercase tracking-wider h-full">
+                                        Today
+                                    </button>
+                                    <button onClick={() => setCurrentWeekStart(prev => prev.plus({ weeks: 1 }))} className="px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink text-xs font-bold h-full flex items-center gap-1">
+                                        Next Week <span>→</span>
+                                    </button>
+                                </div>
+                            </div>
+                            
                             <div className="flex items-center gap-4 text-sm font-medium">
                                 <button
                                     onClick={() => setViewMode('list')}
@@ -376,8 +384,8 @@ export default function Calendar() {
                         </div>
 
                         {viewMode === 'list' ? (
-                            <div className="grid gap-6 md:grid-cols-2">
-                                <div className="rounded-lg bg-transparent">
+                            <div className="flex flex-col md:flex-row gap-8">
+                                <div className="flex-1 md:border-r border-dashed border-pharmacy-ink/20 md:pr-8">
                                     {Object.keys(groupedAvailabilities).length === 0 ? (
                                         <p className="text-sm text-pharmacy-muted">No schedules configured for this professional.</p>
                                     ) : (
@@ -410,7 +418,7 @@ export default function Calendar() {
                                     )}
                                 </div>
 
-                                <div className="rounded-lg bg-transparent h-fit">
+                                <div className="flex-1 rounded-lg bg-transparent h-fit">
                                     <div className="flex items-center justify-between mb-3">
                                         <h3 className="font-display text-lg text-pharmacy-ink">Booked appointments</h3>
                                         <span className="text-xs font-semibold text-pharmacy-muted">{appointments.filter(a => a.status !== 'cancelled').length} active</span>
@@ -507,18 +515,21 @@ export default function Calendar() {
                                                             let cellContent: React.ReactNode = null;
 
                                                             if (details.status === 'Booked') {
-                                                                cellClass = 'bg-red-50 border-red-200 text-red-700';
+                                                                cellClass = 'bg-emerald-50 border-emerald-200 text-emerald-800';
                                                                 cellContent = (
-                                                                    <div className="flex flex-col items-center justify-center leading-tight">
-                                                                        <span className="font-bold text-[11px]">{details.appointment!.client_name}</span>
-                                                                        <span className="font-mono text-[10px] opacity-80">{details.appointment!.client_phone}</span>
+                                                                    <div className="flex items-center justify-between w-full px-1">
+                                                                        <div className="flex items-baseline gap-1.5 truncate">
+                                                                            <span className="font-bold text-[11px] text-emerald-900 truncate">{details.appointment!.client_name}</span>
+                                                                            <span className="font-mono text-[10px] text-emerald-700/80">{details.appointment!.client_phone}</span>
+                                                                        </div>
+                                                                        <span className="font-bold text-[9px] uppercase tracking-wider text-emerald-900 bg-white/60 px-1.5 py-0.5 rounded shrink-0">Rm {details.appointment!.room_number}</span>
                                                                     </div>
                                                                 );
                                                             } else if (details.status === 'Holiday') {
                                                                 cellClass = 'bg-purple-50 border-purple-200 text-purple-600 opacity-90';
                                                                 cellContent = <span className="font-bold text-xs tracking-[0.1em] uppercase">{details.label}</span>;
                                                             } else if (details.status === 'Available') {
-                                                                cellClass = 'bg-emerald-50 border-emerald-200 text-emerald-700';
+                                                                cellClass = 'bg-white border-emerald-100 text-emerald-700';
                                                             } else {
                                                                 cellClass = 'bg-pharmacy-cream border-pharmacy-ink/5 text-pharmacy-muted';
                                                             }
@@ -528,8 +539,10 @@ export default function Calendar() {
                                                                     <td className="border-b border-r border-pharmacy-ink/10 px-4 py-2 text-center text-pharmacy-muted font-medium bg-pharmacy-cream/40">
                                                                         {hour.toString().padStart(2, '0')}:{minute.toString().padStart(2, '0')}
                                                                     </td>
-                                                                    <td className={`border-b px-2 py-1 text-center transition-colors text-xs ${cellClass}`}>
-                                                                        {cellContent}
+                                                                    <td className={`border-b px-2 py-1 transition-colors text-xs ${cellClass}`}>
+                                                                        <div className="w-full flex items-center justify-center h-full min-h-[24px]">
+                                                                            {cellContent}
+                                                                        </div>
                                                                     </td>
                                                                 </tr>
                                                             );
