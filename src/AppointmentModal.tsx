@@ -187,6 +187,16 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
         if (onlyNumbers.length <= 9) setClientPhone(onlyNumbers);
     };
 
+    // Switching the professional invalidates the previously picked date/time, since availability differs per professional
+    const handleProfessionalChange = (newProfessionalId: string) => {
+        setModalProfessionalId(newProfessionalId);
+        setConfirmedDate(null);
+        setConfirmedTime(null);
+        setTempDate(null);
+        setTempTime(null);
+        setActivePanel('NONE');
+    };
+
     const handleFormSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setErrorMessage('');
@@ -382,7 +392,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                             ) : (
                                 <select
                                     value={modalProfessionalId}
-                                    onChange={(e) => setModalProfessionalId(e.target.value)}
+                                    onChange={(e) => handleProfessionalChange(e.target.value)}
                                     className="w-full rounded-lg border border-pharmacy-ink/20 p-2 text-pharmacy-ink shadow-sm focus:border-pharmacy-gold focus:ring-2 focus:ring-pharmacy-gold/20"
                                 >
                                     {professionals.map(prof => (
