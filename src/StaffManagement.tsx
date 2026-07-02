@@ -38,6 +38,7 @@ export default function StaffManagement() {
 
     const [errorMessage, setErrorMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [updatingDurationId, setUpdatingDurationId] = useState<number | null>(null);
 
     // Retrieves the complete list of clinic specialists
     const fetchProfessionals = async () => {
@@ -122,6 +123,28 @@ export default function StaffManagement() {
             setErrorMessage('Error inserting professional: ' + getErrorMessage(error));
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    // Corrects a professional's consultation duration after registration (drives the Calendar grid's slot granularity)
+    const updateProfessionalDuration = async (professionalId: number, newDurationMinutes: number) => {
+        setErrorMessage('');
+        setUpdatingDurationId(professionalId);
+        try {
+            const { error } = await supabase
+                .from('professionals')
+                .update({ default_duration_minutes: newDurationMinutes })
+                .eq('id', professionalId);
+
+            if (error) {
+                throw new Error(error.message);
+            }
+
+            await fetchProfessionals();
+        } catch (error) {
+            setErrorMessage('Error updating consultation duration: ' + getErrorMessage(error));
+        } finally {
+            setUpdatingDurationId(null);
         }
     };
 
@@ -245,6 +268,35 @@ export default function StaffManagement() {
                             {isLoading ? 'Processing insertion...' : 'Register Specialist'}
                         </button>
                     </form>
+
+                    <div className="border-t border-pharmacy-cream-dark pt-4">
+                        <h3 className="text-xs font-bold text-pharmacy-muted uppercase tracking-wider mb-2">Registered Specialists</h3>
+                        {professionals.length === 0 ? (
+                            <p className="text-xs text-pharmacy-muted">No specialists registered yet.</p>
+                        ) : (
+                            <ul className="flex flex-col gap-2 max-h-48 overflow-y-auto custom-scrollbar pr-1">
+                                {professionals.map((p) => (
+                                    <li key={p.id} className="flex items-center justify-between gap-2 text-xs bg-pharmacy-cream p-2 rounded-lg border border-pharmacy-ink/10">
+                                        <div className="min-w-0">
+                                            <span className="font-bold text-pharmacy-ink block truncate">{p.full_name}</span>
+                                            <span className="text-pharmacy-muted">{p.specialty}</span>
+                                        </div>
+                                        <select
+                                            value={p.default_duration_minutes}
+                                            onChange={(e) => updateProfessionalDuration(p.id, parseInt(e.target.value))}
+                                            disabled={updatingDurationId === p.id}
+                                            aria-label={`Consultation duration for ${p.full_name}`}
+                                            className="shrink-0 border border-pharmacy-ink/20 rounded p-1 text-xs bg-white focus:outline-none disabled:opacity-50"
+                                        >
+                                            <option value="15">15 min</option>
+                                            <option value="30">30 min</option>
+                                            <option value="60">60 min</option>
+                                        </select>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
                 </div>
 
                 {/* Dynamic Schedule Configuration Panel */}
