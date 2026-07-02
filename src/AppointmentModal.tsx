@@ -491,11 +491,11 @@ export default function AppointmentModal({
                                     value={countryIso2}
                                     onChange={(e) => setCountryIso2(e.target.value)}
                                     aria-label="Country dial code"
-                                    className="max-w-[7.5rem] shrink-0 bg-pharmacy-cream-dark px-2 text-sm font-medium text-pharmacy-muted border-r border-pharmacy-ink/20 focus:outline-none"
+                                    className="w-[5.5rem] shrink-0 bg-pharmacy-cream-dark px-2 text-sm font-medium text-pharmacy-muted border-r border-pharmacy-ink/20 focus:outline-none"
                                 >
                                     {COUNTRY_DIAL_CODES.map((country) => (
                                         <option key={country.iso2} value={country.iso2}>
-                                            {getFlagEmoji(country.iso2)} {country.name} ({country.dialCode})
+                                            {getFlagEmoji(country.iso2)} {country.iso2} ({country.dialCode})
                                         </option>
                                     ))}
                                 </select>
@@ -651,4 +651,5 @@ export default function AppointmentModal({
             </div>
         </div>
     );
+}
 }
