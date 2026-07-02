@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { supabase } from './lib/supabase';
 import { DateTime } from 'luxon';
 import { getMaltaHolidays } from './holidays';
-import { useAuth } from './context/AuthContext';
 import { getErrorMessage } from './lib/errors';
 
 interface Professional {
@@ -23,9 +22,6 @@ interface Availability {
 const DAYS_OF_WEEK = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
 export default function StaffManagement() {
-    // Sealed role read from app_metadata, never user_metadata
-    const { role } = useAuth();
-
     const [professionals, setProfessionals] = useState<Professional[]>([]);
     const [selectedProfessional, setSelectedProfessional] = useState<string>('');
     const [availabilities, setAvailabilities] = useState<Availability[]>([]);
