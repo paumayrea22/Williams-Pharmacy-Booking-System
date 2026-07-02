@@ -5,6 +5,7 @@ import AppointmentModal from './AppointmentModal';
 import { useAuth } from './context/AuthContext';
 import { getMaltaHolidayName } from './holidays';
 import { getErrorMessage } from './lib/errors';
+import { formatDisplayPhone } from './lib/countryCodes';
 
 // Safari still requires the vendor-prefixed constructor, which is absent from the DOM lib types
 interface WindowWithWebkitAudio extends Window {
@@ -71,20 +72,15 @@ interface SlotDetails {
 
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
-// Quarter-hour slots split into a morning shift (08:00-13:45) and an afternoon shift (14:00-19:45)
-const MORNING_SLOTS: { hour: number; minute: number }[] = [];
-for (let hour = 8; hour < 14; hour++) {
-    for (const minute of [0, 15, 30, 45]) {
-        MORNING_SLOTS.push({ hour, minute });
+// Builds slots from startHour (inclusive) to endHour (exclusive), stepping by the given minute interval
+const buildTimeSlots = (startHour: number, endHour: number, stepMinutes: number): { hour: number; minute: number }[] => {
+    const slots: { hour: number; minute: number }[] = [];
+    for (let totalMinutes = startHour * 60; totalMinutes < endHour * 60; totalMinutes += stepMinutes) {
+        slots.push({ hour: Math.floor(totalMinutes / 60), minute: totalMinutes % 60 });
     }
-}
+    return slots;
+};
 
-const AFTERNOON_SLOTS: { hour: number; minute: number }[] = [];
-for (let hour = 14; hour <= 19; hour++) {
-    for (const minute of [0, 15, 30, 45]) {
-        AFTERNOON_SLOTS.push({ hour, minute });
-    }
-}
 
 export default function Calendar() {
     const { role, username } = useAuth();
@@ -294,6 +290,12 @@ export default function Calendar() {
         return { status: 'Unavailable' };
     };
 
+    // The grid's slot granularity mirrors the selected professional's own consultation length
+    // (set per-specialty by the pharmacist in Staff Management: 15 / 30 / 60 minutes).
+    const gridStepMinutes = professionals.find(p => p.id.toString() === selectedProfessional)?.default_duration_minutes ?? 15;
+    const morningSlots = buildTimeSlots(8, 14, gridStepMinutes);
+    const afternoonSlots = buildTimeSlots(14, 20, gridStepMinutes);
+
     return (
         <div className="flex h-full flex-col bg-pharmacy-cream relative">
 
@@ -437,7 +439,7 @@ export default function Calendar() {
                                                             <div>
                                                                 <div className="flex items-baseline gap-2">
                                                                     <span className="font-bold text-pharmacy-ink">{appt.client_name}</span>
-                                                                    <span className="text-xs font-mono text-pharmacy-muted">+356 {appt.client_phone}</span>
+                                                                    <span className="text-xs font-mono text-pharmacy-muted">{formatDisplayPhone(appt.client_phone)}</span>
                                                                 </div>
                                                                 <div className="text-xs text-pharmacy-muted mt-0.5">
                                                                     {DAYS_OF_WEEK[uiDayIndex]} · {apptTime.toFormat('HH:mm')}
@@ -490,8 +492,8 @@ export default function Calendar() {
 
                                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                                     {[
-                                        { label: 'Morning', slots: MORNING_SLOTS },
-                                        { label: 'Afternoon', slots: AFTERNOON_SLOTS },
+                                        { label: 'Morning', slots: morningSlots },
+                                        { label: 'Afternoon', slots: afternoonSlots },
                                     ].map(({ label, slots }) => {
                                         const currentDate = currentWeekStart.plus({ days: gridSelectedDay });
                                         
@@ -520,7 +522,7 @@ export default function Calendar() {
                                                                     <div className="flex items-center justify-between w-full px-1">
                                                                         <div className="flex items-baseline gap-1.5 truncate">
                                                                             <span className="font-bold text-[11px] text-emerald-900 truncate">{details.appointment!.client_name}</span>
-                                                                            <span className="font-mono text-[10px] text-emerald-700/80">{details.appointment!.client_phone}</span>
+                                                                            <span className="font-mono text-[10px] text-emerald-700/80">{formatDisplayPhone(details.appointment!.client_phone)}</span>
                                                                         </div>
                                                                         <span className="font-bold text-[9px] uppercase tracking-wider text-emerald-900 bg-white/60 px-1.5 py-0.5 rounded shrink-0">Rm {details.appointment!.room_number}</span>
                                                                     </div>

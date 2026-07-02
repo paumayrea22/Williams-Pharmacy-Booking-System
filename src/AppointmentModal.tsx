@@ -4,6 +4,7 @@ import { DateTime } from 'luxon';
 import { getMaltaHolidayName } from './holidays';
 import { useAuth } from './context/AuthContext';
 import { getErrorMessage } from './lib/errors';
+import { COUNTRY_DIAL_CODES, DEFAULT_COUNTRY_ISO2, findCountryByIso2, getFlagEmoji, splitStoredPhone } from './lib/countryCodes';
 
 interface Professional {
     id: number;
@@ -48,6 +49,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
     const [modalProfessionalId, setModalProfessionalId] = useState(selectedProfessionalId);
     const [clientName, setClientName] = useState('');
     const [clientPhone, setClientPhone] = useState('');
+    const [countryIso2, setCountryIso2] = useState(DEFAULT_COUNTRY_ISO2);
     const [roomNumber, setRoomNumber] = useState('1');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
@@ -76,7 +78,12 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
             // Prefill the form with the existing appointment's data
             setModalProfessionalId(appointmentToEdit.professional_id.toString());
             setClientName(appointmentToEdit.client_name);
-            setClientPhone(appointmentToEdit.client_phone);
+
+            // Legacy records were stored as raw digits with an implicit Malta prefix
+            const { iso2, localNumber } = splitStoredPhone(appointmentToEdit.client_phone);
+            setCountryIso2(iso2);
+            setClientPhone(localNumber);
+
             setRoomNumber(appointmentToEdit.room_number.toString());
 
             const oldDate = DateTime.fromISO(appointmentToEdit.start_time_utc, { zone: 'Europe/Malta' });
@@ -90,6 +97,7 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
             setConfirmedTime(null);
             setClientName('');
             setClientPhone('');
+            setCountryIso2(DEFAULT_COUNTRY_ISO2);
             setRoomNumber('1');
         }
         setTempDate(null);
@@ -231,11 +239,12 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
             }
 
             // Phase 2: Execute the secure RPC with the new booking data
+            const selectedDialCode = findCountryByIso2(countryIso2).dialCode;
             const { error: rpcError } = await supabase.rpc('book_appointment_secure', {
                 p_professional_id: parseInt(modalProfessionalId),
                 p_room_number: parseInt(roomNumber),
                 p_client_name: clientName.trim(),
-                p_client_phone: clientPhone,
+                p_client_phone: `${selectedDialCode} ${clientPhone}`,
                 p_start_time_utc: startDateTime.toUTC().toISO(),
                 p_end_time_utc: endDateTime.toUTC().toISO(),
                 p_staff_username: staffUsername
@@ -411,9 +420,18 @@ export default function AppointmentModal({ isOpen, onClose, onSuccess, selectedP
                         <div>
                             <label className="block text-sm font-semibold text-pharmacy-ink mb-1">Mobile Number</label>
                             <div className="flex shadow-sm rounded-lg overflow-hidden border border-pharmacy-ink/20 focus-within:border-pharmacy-gold focus-within:ring-2 focus-within:ring-pharmacy-gold/20 bg-white">
-                                <span className="flex items-center justify-center bg-pharmacy-cream-dark px-3 text-sm font-medium text-pharmacy-muted border-r border-pharmacy-ink/20">
-                                    +356
-                                </span>
+                                <select
+                                    value={countryIso2}
+                                    onChange={(e) => setCountryIso2(e.target.value)}
+                                    aria-label="Country dial code"
+                                    className="max-w-[7.5rem] shrink-0 bg-pharmacy-cream-dark px-2 text-sm font-medium text-pharmacy-muted border-r border-pharmacy-ink/20 focus:outline-none"
+                                >
+                                    {COUNTRY_DIAL_CODES.map((country) => (
+                                        <option key={country.iso2} value={country.iso2}>
+                                            {getFlagEmoji(country.iso2)} {country.name} ({country.dialCode})
+                                        </option>
+                                    ))}
+                                </select>
                                 <input
                                     type="text"
                                     value={clientPhone}
