@@ -305,7 +305,7 @@ export default function StaffManagement() {
     ].filter(h => DateTime.fromISO(h.date, { zone: 'Europe/Malta' }) >= today);
 
     return (
-        <div className="p-6 bg-pharmacy-cream min-h-full flex flex-col gap-6">
+        <div className="p-4 sm:p-6 bg-pharmacy-cream h-screen overflow-y-auto custom-scrollbar flex flex-col gap-6 pb-16">
             <div>
                 <p className="text-xs font-semibold tracking-[0.2em] text-pharmacy-gold-dark uppercase">Staff Management</p>
                 <h1 className="font-display text-3xl text-pharmacy-ink">Register specialists and schedules</h1>
@@ -410,7 +410,7 @@ export default function StaffManagement() {
                         </select>
                     </div>
 
-                    <form onSubmit={addAvailability} className="grid grid-cols-4 gap-2 bg-pharmacy-cream p-3 rounded-lg border border-pharmacy-ink/10 items-end">
+                    <form onSubmit={addAvailability} className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-pharmacy-cream p-3 rounded-lg border border-pharmacy-ink/10 items-end">
                         <div>
                             <label className="block text-xs font-bold text-pharmacy-muted mb-1">Day of Week</label>
                             <select value={newDay} onChange={(e) => setNewDay(e.target.value)} className="w-full border border-pharmacy-ink/20 rounded p-1 text-xs bg-white focus:outline-none">
@@ -431,7 +431,7 @@ export default function StaffManagement() {
                             <label className="block text-xs font-bold text-pharmacy-muted mb-1">End Time</label>
                             <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-full border border-pharmacy-ink/20 rounded p-1 text-xs bg-white focus:outline-none" />
                         </div>
-                        <div>
+                        <div className="col-span-2 sm:col-span-1">
                             <button type="submit" disabled={isLoading || !selectedProfessional} className="w-full bg-pharmacy-green text-white rounded p-1.5 text-xs font-bold hover:bg-pharmacy-green-light transition disabled:opacity-50">
                                 Add
                             </button>

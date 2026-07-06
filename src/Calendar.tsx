@@ -542,7 +542,7 @@ export default function Calendar() {
                 </div>
             )}
 
-            <header className="flex flex-col gap-4 border-b border-pharmacy-cream-dark p-6 sm:flex-row sm:items-end sm:justify-between shrink-0">
+            <header className="flex flex-col gap-4 border-b border-pharmacy-cream-dark p-4 sm:p-6 sm:flex-row sm:items-end sm:justify-between shrink-0">
                 <div>
                     <p className="text-xs font-semibold tracking-[0.2em] text-pharmacy-gold-dark uppercase mb-1">Appointment Management</p>
                     <h1 className="font-display text-3xl text-pharmacy-ink">
@@ -577,7 +577,7 @@ export default function Calendar() {
                 </div>
             </header>
 
-            <div className="flex-1 overflow-auto bg-pharmacy-cream p-6">
+            <div className="flex-1 overflow-auto bg-pharmacy-cream p-4 sm:p-6">
                 {(selectedProfessional === 'MONTH_SUMMARY' ? isMonthSummaryLoading : isDataLoading) ? (
                     <div className="flex h-64 items-center justify-center rounded-lg border-2 border-dashed border-pharmacy-ink/20 bg-white">
                         <p className="text-pharmacy-muted animate-pulse font-medium">Syncing Malta databases...</p>
@@ -585,17 +585,17 @@ export default function Calendar() {
                 ) : selectedProfessional === 'MONTH_SUMMARY' ? (
                     <div className="flex flex-col gap-6 h-full">
                         <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-pharmacy-cream-dark pb-3 gap-4 shrink-0">
-                            <div className="flex items-center gap-6">
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
                                 <h2 className="font-display text-xl text-pharmacy-ink">Monthly Appointment Summary</h2>
                                 <div className="flex items-center bg-white rounded-lg border border-pharmacy-ink/20 shadow-sm overflow-hidden h-8">
                                     <button onClick={() => setMonthSummaryDate(prev => prev.minus({ months: 1 }))} className="px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink text-xs font-bold h-full flex items-center gap-1">
-                                        <span>←</span> Prev Month
+                                        <span>←</span> <span className="hidden sm:inline">Prev </span>Month
                                     </button>
                                     <button onClick={() => setMonthSummaryDate(DateTime.local({ zone: 'Europe/Malta' }).startOf('month'))} className="px-3 hover:bg-pharmacy-cream transition border-x border-pharmacy-ink/10 text-[10px] font-bold text-pharmacy-muted uppercase tracking-wider h-full">
                                         This Month
                                     </button>
                                     <button onClick={() => setMonthSummaryDate(prev => prev.plus({ months: 1 }))} className="px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink text-xs font-bold h-full flex items-center gap-1">
-                                        Next Month <span>→</span>
+                                        <span className="hidden sm:inline">Next </span>Month <span>→</span>
                                     </button>
                                 </div>
                             </div>
@@ -606,23 +606,23 @@ export default function Calendar() {
                 ) : (
                     <div className="flex flex-col gap-6 h-full">
                         <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-pharmacy-cream-dark pb-3 gap-4 shrink-0">
-                            <div className="flex items-center gap-6">
+                            <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
                                 <h2 className="font-display text-xl text-pharmacy-ink">{selectedProfessional === 'ALL' ? 'General Clinic Schedule' : 'Weekly availability'}</h2>
 
                                 <div className="flex items-center bg-white rounded-lg border border-pharmacy-ink/20 shadow-sm overflow-hidden h-8">
                                     <button onClick={() => setCurrentWeekStart(prev => prev.minus({ weeks: 1 }))} className="px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink text-xs font-bold h-full flex items-center gap-1">
-                                        <span>←</span> Prev Week
+                                        <span>←</span> <span className="hidden sm:inline">Prev </span>Week
                                     </button>
                                     <button onClick={() => setCurrentWeekStart(DateTime.local({ zone: 'Europe/Malta' }).startOf('week'))} className="px-3 hover:bg-pharmacy-cream transition border-x border-pharmacy-ink/10 text-[10px] font-bold text-pharmacy-muted uppercase tracking-wider h-full">
                                         Today
                                     </button>
                                     <button onClick={() => setCurrentWeekStart(prev => prev.plus({ weeks: 1 }))} className="px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink text-xs font-bold h-full flex items-center gap-1">
-                                        Next Week <span>→</span>
+                                        <span className="hidden sm:inline">Next </span>Week <span>→</span>
                                     </button>
                                 </div>
                             </div>
 
-                            <div className="flex items-center gap-4 text-sm font-medium">
+                            <div className="flex flex-wrap items-center gap-4 text-sm font-medium">
                                 <div className="flex items-center gap-2 mr-2">
                                     <label className="text-sm font-medium text-pharmacy-muted">Day:</label>
                                     <select

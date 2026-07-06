@@ -267,7 +267,7 @@ export default function DoctorLeaveManagement() {
     };
 
     return (
-        <div className="p-6 bg-pharmacy-cream h-screen overflow-y-auto custom-scrollbar flex flex-col gap-6 pb-16">
+        <div className="p-4 sm:p-6 bg-pharmacy-cream h-screen overflow-y-auto custom-scrollbar flex flex-col gap-6 pb-16">
             <div>
                 <p className="text-xs font-semibold tracking-[0.2em] text-pharmacy-gold-dark uppercase">Vacation Controls</p>
                 <h1 className="font-display text-3xl text-pharmacy-ink">Manage Doctor Leave Schemes</h1>

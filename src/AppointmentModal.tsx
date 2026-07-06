@@ -464,9 +464,9 @@ export default function AppointmentModal({
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-pharmacy-green/50 p-4 backdrop-blur-sm">
-            <div className="flex w-full max-w-4xl h-fit max-h-[90vh] bg-white rounded-2xl shadow-2xl overflow-hidden border border-pharmacy-ink/10">
+            <div className="flex flex-col md:flex-row w-full max-w-4xl h-fit max-h-[90vh] bg-white rounded-2xl shadow-2xl overflow-y-auto md:overflow-hidden border border-pharmacy-ink/10">
 
-                <div className="w-1/2 p-6 border-r border-pharmacy-cream-dark bg-pharmacy-cream/40 flex flex-col">
+                <div className="w-full md:w-1/2 p-6 border-b md:border-b-0 md:border-r border-pharmacy-cream-dark bg-pharmacy-cream/40 flex flex-col">
                     <h2 className="font-display text-2xl text-pharmacy-ink mb-4 shrink-0">
                         {appointmentToEdit ? 'Reschedule Appointment' : 'Book Appointment'}
                     </h2>
@@ -614,7 +614,7 @@ export default function AppointmentModal({
                     </form>
                 </div>
 
-                <div className="w-1/2 p-6 bg-white flex flex-col">
+                <div className="w-full md:w-1/2 p-6 bg-white flex flex-col">
                     {activePanel === 'NONE' && (
                         <div className="m-auto flex flex-col items-center justify-center text-pharmacy-muted">
                             <svg className="w-16 h-16 mb-4 text-pharmacy-cream-dark" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -66,14 +66,14 @@ export default function Login() {
     };
 
     return (
-        <div className="flex min-h-screen items-center justify-center bg-gray-100 p-4">
-            <div className="w-full max-w-md rounded-xl bg-white p-8 shadow-lg">
-                <h2 className="mb-6 text-center text-2xl font-bold text-gray-800">
+        <div className="flex min-h-screen items-center justify-center bg-pharmacy-cream p-4">
+            <div className="w-full max-w-md rounded-xl bg-white p-6 sm:p-8 shadow-lg border border-pharmacy-ink/10">
+                <h2 className="mb-6 text-center font-display text-2xl text-pharmacy-ink">
                     {isRegistering ? 'Staff Registration' : 'Internal Access'}
                 </h2>
 
                 {errorMessage && (
-                    <div className="mb-4 rounded-lg border border-red-200 bg-red-100 p-3 text-sm text-red-700">
+                    <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
                         {errorMessage}
                     </div>
                 )}
@@ -81,13 +81,13 @@ export default function Login() {
                 <form onSubmit={handleFormSubmit} className="space-y-4">
                     {isRegistering && (
                         <div>
-                            <label className="block text-sm font-medium text-gray-700">Username</label>
+                            <label className="block text-sm font-medium text-pharmacy-ink">Username</label>
                             <input
                                 type="text"
                                 value={username}
                                 onChange={(e) => setUsername(e.target.value)}
                                 placeholder="Ex: P-Denisse or D-Fsadni"
-                                className="mt-1 w-full rounded-md border border-gray-300 p-3 shadow-sm focus:border-blue-500 focus:outline-none"
+                                className="mt-1 w-full rounded-md border border-pharmacy-ink/20 p-3 shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold"
                                 required={isRegistering}
                                 disabled={isProcessing}
                             />
@@ -95,27 +95,27 @@ export default function Login() {
                     )}
 
                     <div>
-                        <label className="block text-sm font-medium text-gray-700">Email Address</label>
+                        <label className="block text-sm font-medium text-pharmacy-ink">Email Address</label>
                         <input
                             type="email"
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
                             placeholder="email@pharmacy.com"
-                            className="mt-1 w-full rounded-md border border-gray-300 p-3 shadow-sm focus:border-blue-500 focus:outline-none"
+                            className="mt-1 w-full rounded-md border border-pharmacy-ink/20 p-3 shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold"
                             required
                             disabled={isProcessing}
                         />
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium text-gray-700">Password</label>
+                        <label className="block text-sm font-medium text-pharmacy-ink">Password</label>
                         <input
                             type="password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
                             placeholder="Minimum 8 characters"
                             minLength={8}
-                            className="mt-1 w-full rounded-md border border-gray-300 p-3 shadow-sm focus:border-blue-500 focus:outline-none"
+                            className="mt-1 w-full rounded-md border border-pharmacy-ink/20 p-3 shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold"
                             required
                             disabled={isProcessing}
                         />
@@ -124,8 +124,8 @@ export default function Login() {
                     <button
                         type="submit"
                         disabled={isProcessing}
-                        className={`w-full rounded-md p-3 font-semibold text-white transition ${
-                            isProcessing ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                        className={`w-full rounded-md p-3 font-semibold transition ${
+                            isProcessing ? 'bg-gray-300 text-white cursor-not-allowed' : 'bg-pharmacy-gold text-pharmacy-green hover:bg-pharmacy-gold-dark hover:text-white'
                         }`}
                     >
                         {isProcessing ? 'Processing...' : (isRegistering ? 'Create Secure Account' : 'Enter System')}
@@ -139,7 +139,7 @@ export default function Login() {
                             setErrorMessage('');
                         }}
                         disabled={isProcessing}
-                        className="text-sm text-blue-600 hover:underline disabled:text-gray-400"
+                        className="text-sm text-pharmacy-gold-dark hover:underline disabled:text-gray-400"
                     >
                         {isRegistering ? 'Already have an account? Sign in' : 'First time? Create your password'}
                     </button>

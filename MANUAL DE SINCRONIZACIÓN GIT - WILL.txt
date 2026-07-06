@@ -1,0 +1,53 @@
+MANUAL DE SINCRONIZACIÓN GIT - WILLIAM'S PHARMACY
+REGLA DE ORO: Si al hacer un pull aparece una pantalla negra (Vim), la salida de emergencia es siempre teclear: Esc -> :wq -> Enter.
+
+ESCENARIO A: Sincronización Total (Ambos tenéis cambios locales)
+Situación: Iván ha modificado archivos en su PC y tú también en el tuyo. Ninguno quiere perder su trabajo.
+
+Turno 1: El primero en subir (Iván)
+
+Bash
+git add .
+git commit -m "refactor: update codebase files"
+git pull origin main
+git push origin main
+Turno 2: El que unifica y resuelve (Tú)
+
+Bash
+git add .
+git commit -m "chore: save my local changes before merge"
+git pull origin main
+git push origin main
+Turno 3: El cierre (Iván)
+
+Bash
+git pull origin main
+(Resultado: Ambos ordenadores tienen exactamente los mismos archivos combinados).
+
+ESCENARIO B: Modo Lectura (Solo quieres descargar)
+Situación: El otro ha trabajado y subido código. Tú acabas de encender el ordenador y no has tocado ni una sola línea de código aún.
+
+Ejecutar en tu terminal:
+
+Bash
+git pull origin main
+ESCENARIO C: Modo Escritura (Solo tú tienes cambios)
+Situación: Tú has estado programando. El otro compañero no ha tocado nada hoy y su ordenador está apagado o inactivo.
+
+Ejecutar en tu terminal:
+
+Bash
+git add .
+git commit -m "feat: new functionality added"
+git pull origin main
+git push origin main
+(Nota: El pull antes del push se hace siempre por seguridad, por si alguien subió algo sin avisar).
+
+ESCENARIO D: Comprobación de Estado (El Radar)
+Situación: No te acuerdas de si has modificado algún archivo o si tienes cambios pendientes de guardar.
+
+Ejecutar en tu terminal:
+
+Bash
+git status
+(Si salen letras/archivos en rojo, tienes cambios sin guardar. Ve al Escenario A o C).
