@@ -39,9 +39,9 @@ interface AppointmentModalProps {
     selectedProfessionalId: string;
     professionals: Professional[];
     appointmentToEdit?: Appointment | null;
-    initialDate?: DateTime | null; // Deep-linked temporal prefill
-    initialTime?: string[]; // Deep-linked slot prefill
-    initialRoom?: string; // Deep-linked physical resource prefill
+    initialDate?: DateTime | null;
+    initialTime?: string[];
+    initialRoom?: string;
 }
 
 const extractNameAndNote = (fullName: string) => {
@@ -117,7 +117,6 @@ export default function AppointmentModal({
             setTempTime(times);
 
         } else if (initialDate && initialTime && initialTime.length > 0) {
-            // Deep-link architecture: Bypass configuration panels entirely
             setModalProfessionalId(selectedProfessionalId === 'ALL' ? (professionals[0]?.id.toString() || '') : selectedProfessionalId);
             setConfirmedDate(initialDate);
             setConfirmedTime(initialTime);
