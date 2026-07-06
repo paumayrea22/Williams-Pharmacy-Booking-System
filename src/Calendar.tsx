@@ -551,9 +551,9 @@ export default function Calendar() {
                             : (currentWeekStart.hasSame(DateTime.local(), 'week') ? 'The week ahead' : `Week of ${currentWeekStart.toFormat('MMMM d')}`)}
                     </h1>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
                     {isDoctor ? (
-                        <div className="rounded-full border border-pharmacy-ink/20 bg-white px-4 py-2 text-pharmacy-ink shadow-sm font-medium text-sm">
+                        <div className="rounded-full border border-pharmacy-ink/20 bg-white px-4 py-2 text-pharmacy-ink shadow-sm font-medium text-sm text-center sm:text-left">
                             {isStaffLoading ? 'Loading staff...' : (() => {
                                 const own = professionals.find(p => p.id.toString() === selectedProfessional);
                                 return own ? `${own.full_name} (${own.specialty})` : 'Unknown professional';
@@ -564,7 +564,7 @@ export default function Calendar() {
                             value={selectedProfessional}
                             onChange={(e) => setSelectedProfessional(e.target.value)}
                             disabled={isStaffLoading || isDataLoading || isMonthSummaryLoading}
-                            className="rounded-full border border-pharmacy-ink/20 bg-white px-4 py-2 text-sm text-pharmacy-ink shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold disabled:opacity-50 font-medium"
+                            className="w-full sm:w-auto rounded-full border border-pharmacy-ink/20 bg-white px-4 py-2 text-sm text-pharmacy-ink shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold disabled:opacity-50 font-medium"
                         >
                             <option value="ALL">General (All Rooms & Doctors)</option>
                             <option value="MONTH_SUMMARY">Monthly Summary (All Appointments)</option>
@@ -573,7 +573,7 @@ export default function Calendar() {
                             ))}
                         </select>
                     )}
-                    <button onClick={() => setIsModalOpen(true)} className="rounded-full bg-pharmacy-gold px-5 py-2.5 text-sm font-semibold text-pharmacy-green shadow-md hover:bg-pharmacy-gold-dark hover:text-white transition-all">+ New appointment</button>
+                    <button onClick={() => setIsModalOpen(true)} className="w-full sm:w-auto rounded-full bg-pharmacy-gold px-5 py-2.5 text-sm font-semibold text-pharmacy-green shadow-md hover:bg-pharmacy-gold-dark hover:text-white transition-all">+ New appointment</button>
                 </div>
             </header>
 
@@ -587,14 +587,14 @@ export default function Calendar() {
                         <div className="flex flex-col lg:flex-row lg:items-center justify-between border-b border-pharmacy-cream-dark pb-3 gap-4 shrink-0">
                             <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
                                 <h2 className="font-display text-xl text-pharmacy-ink">Monthly Appointment Summary</h2>
-                                <div className="flex items-center bg-white rounded-lg border border-pharmacy-ink/20 shadow-sm overflow-hidden h-8">
-                                    <button onClick={() => setMonthSummaryDate(prev => prev.minus({ months: 1 }))} className="px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink text-xs font-bold h-full flex items-center gap-1">
+                                <div className="flex items-center w-full sm:w-auto bg-white rounded-lg border border-pharmacy-ink/20 shadow-sm overflow-hidden h-8">
+                                    <button onClick={() => setMonthSummaryDate(prev => prev.minus({ months: 1 }))} className="flex-1 sm:flex-initial px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink text-xs font-bold h-full flex items-center justify-center gap-1">
                                         <span>←</span> <span className="hidden sm:inline">Prev </span>Month
                                     </button>
-                                    <button onClick={() => setMonthSummaryDate(DateTime.local({ zone: 'Europe/Malta' }).startOf('month'))} className="px-3 hover:bg-pharmacy-cream transition border-x border-pharmacy-ink/10 text-[10px] font-bold text-pharmacy-muted uppercase tracking-wider h-full">
+                                    <button onClick={() => setMonthSummaryDate(DateTime.local({ zone: 'Europe/Malta' }).startOf('month'))} className="flex-1 sm:flex-initial px-3 hover:bg-pharmacy-cream transition border-x border-pharmacy-ink/10 text-[10px] font-bold text-pharmacy-muted uppercase tracking-wider h-full flex items-center justify-center">
                                         This Month
                                     </button>
-                                    <button onClick={() => setMonthSummaryDate(prev => prev.plus({ months: 1 }))} className="px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink text-xs font-bold h-full flex items-center gap-1">
+                                    <button onClick={() => setMonthSummaryDate(prev => prev.plus({ months: 1 }))} className="flex-1 sm:flex-initial px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink text-xs font-bold h-full flex items-center justify-center gap-1">
                                         <span className="hidden sm:inline">Next </span>Month <span>→</span>
                                     </button>
                                 </div>
@@ -609,14 +609,14 @@ export default function Calendar() {
                             <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
                                 <h2 className="font-display text-xl text-pharmacy-ink">{selectedProfessional === 'ALL' ? 'General Clinic Schedule' : 'Weekly availability'}</h2>
 
-                                <div className="flex items-center bg-white rounded-lg border border-pharmacy-ink/20 shadow-sm overflow-hidden h-8">
-                                    <button onClick={() => setCurrentWeekStart(prev => prev.minus({ weeks: 1 }))} className="px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink text-xs font-bold h-full flex items-center gap-1">
+                                <div className="flex items-center w-full sm:w-auto bg-white rounded-lg border border-pharmacy-ink/20 shadow-sm overflow-hidden h-8">
+                                    <button onClick={() => setCurrentWeekStart(prev => prev.minus({ weeks: 1 }))} className="flex-1 sm:flex-initial px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink text-xs font-bold h-full flex items-center justify-center gap-1">
                                         <span>←</span> <span className="hidden sm:inline">Prev </span>Week
                                     </button>
-                                    <button onClick={() => setCurrentWeekStart(DateTime.local({ zone: 'Europe/Malta' }).startOf('week'))} className="px-3 hover:bg-pharmacy-cream transition border-x border-pharmacy-ink/10 text-[10px] font-bold text-pharmacy-muted uppercase tracking-wider h-full">
+                                    <button onClick={() => setCurrentWeekStart(DateTime.local({ zone: 'Europe/Malta' }).startOf('week'))} className="flex-1 sm:flex-initial px-3 hover:bg-pharmacy-cream transition border-x border-pharmacy-ink/10 text-[10px] font-bold text-pharmacy-muted uppercase tracking-wider h-full flex items-center justify-center">
                                         Today
                                     </button>
-                                    <button onClick={() => setCurrentWeekStart(prev => prev.plus({ weeks: 1 }))} className="px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink text-xs font-bold h-full flex items-center gap-1">
+                                    <button onClick={() => setCurrentWeekStart(prev => prev.plus({ weeks: 1 }))} className="flex-1 sm:flex-initial px-3 hover:bg-pharmacy-cream transition text-pharmacy-ink text-xs font-bold h-full flex items-center justify-center gap-1">
                                         <span className="hidden sm:inline">Next </span>Week <span>→</span>
                                     </button>
                                 </div>
