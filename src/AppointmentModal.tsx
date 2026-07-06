@@ -149,13 +149,17 @@ export default function AppointmentModal({
         }
     }, [isOpen, selectedProfessionalId, professionals, appointmentToEdit, role, username, initialDate, initialTime, initialRoom]);
 
+    // The pharmacy is strictly closed on Sundays and Malta public holidays, regardless of any
+    // availability rows that might exist for that day (e.g. a mistaken Sunday schedule entry).
     const isHolidayBlocked = (dateObj: DateTime): boolean => {
+        if (dateObj.weekday === 7) return true; // 7 is Sunday in Luxon
         const dateISO = dateObj.toISODate();
         if (!dateISO) return false;
         return getMaltaHolidayName(dateISO) !== null;
     };
 
     const getHolidayName = (dateObj: DateTime): string | null => {
+        if (dateObj.weekday === 7) return 'Sunday (Closed)';
         const dateISO = dateObj.toISODate();
         if (!dateISO) return null;
         return getMaltaHolidayName(dateISO);

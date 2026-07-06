@@ -270,6 +270,9 @@ export default function Calendar() {
         const slotDate = currentWeekStart.plus({ days: dayIndex }).set({ hour, minute });
         const sqlDayIndex = slotDate.weekday === 7 ? 0 : slotDate.weekday;
 
+        // The pharmacy is strictly closed on Sundays, regardless of any availability rows for that day
+        if (slotDate.weekday === 7) return { status: 'Holiday', label: 'Sunday (Closed)' };
+
         const holidayName = getMaltaHolidayName(slotDate.toISODate()!);
         if (holidayName) return { status: 'Holiday', label: holidayName };
 
