@@ -73,7 +73,7 @@ export default function DoctorLeaveManagement() {
         try {
             const { data, error } = await supabase
                 .from('doctor_leaves')
-                .select('*')
+                .select('id, professional_id, leave_date')
                 .eq('professional_id', selectedProfessional)
                 .order('leave_date', { ascending: true });
 
@@ -89,7 +89,7 @@ export default function DoctorLeaveManagement() {
         try {
             const { data, error } = await supabase
                 .from('availabilities')
-                .select('*')
+                .select('id, professional_id, day_of_week, start_time, end_time')
                 .eq('professional_id', selectedProfessional)
                 .order('day_of_week', { ascending: true })
                 .order('start_time', { ascending: true });

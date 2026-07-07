@@ -159,7 +159,7 @@ export default function AppointmentModal({
         if (!isOpen) return;
 
         const fetchRooms = async () => {
-            const { data, error } = await supabase.from('rooms').select('*').order('room_number', { ascending: true });
+            const { data, error } = await supabase.from('rooms').select('id, room_number, label').order('room_number', { ascending: true });
             if (!error && data) setRooms(data);
         };
         fetchRooms();
@@ -197,8 +197,8 @@ export default function AppointmentModal({
             if (!startOfMonth || !endOfMonth) return;
 
             const [availRes, apptRes] = await Promise.all([
-                supabase.from('availabilities').select('*').eq('professional_id', modalProfessionalId),
-                supabase.from('appointments').select('*').eq('professional_id', modalProfessionalId)
+                supabase.from('availabilities').select('id, professional_id, day_of_week, start_time, end_time').eq('professional_id', modalProfessionalId),
+                supabase.from('appointments').select('id, professional_id, client_name, client_phone, start_time_utc, end_time_utc, status, room_number').eq('professional_id', modalProfessionalId)
                     .gte('start_time_utc', startOfMonth)
                     .lte('start_time_utc', endOfMonth)
             ]);

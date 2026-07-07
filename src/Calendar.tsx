@@ -185,7 +185,7 @@ export default function Calendar() {
 
     useEffect(() => {
         const fetchProfessionals = async () => {
-            const { data, error } = await supabase.from('professionals').select('*').order('id', { ascending: true });
+            const { data, error } = await supabase.from('professionals').select('id, full_name, specialty, default_duration_minutes').order('id', { ascending: true });
 
             if (!error && data && data.length > 0) {
                 setProfessionals(data);
@@ -211,7 +211,7 @@ export default function Calendar() {
 
     useEffect(() => {
         const fetchRooms = async () => {
-            const { data, error } = await supabase.from('rooms').select('*').order('room_number', { ascending: true });
+            const { data, error } = await supabase.from('rooms').select('id, room_number, label').order('room_number', { ascending: true });
             if (!error && data) setRooms(data);
         };
         fetchRooms();
@@ -225,9 +225,9 @@ export default function Calendar() {
             const startUtc = currentWeekStart.startOf('week').toUTC().toISO();
             const endUtc = currentWeekStart.endOf('week').toUTC().toISO();
 
-            let availQuery = supabase.from('availabilities').select('*');
+            let availQuery = supabase.from('availabilities').select('id, professional_id, day_of_week, start_time, end_time');
             let apptQuery = supabase.from('appointments')
-                .select('*')
+                .select('id, professional_id, client_name, client_phone, start_time_utc, end_time_utc, status, room_number')
                 .gte('start_time_utc', startUtc)
                 .lte('start_time_utc', endUtc)
                 .order('start_time_utc', { ascending: true });
@@ -256,7 +256,7 @@ export default function Calendar() {
 
             const { data, error } = await supabase
                 .from('appointments')
-                .select('*')
+                .select('id, professional_id, client_name, client_phone, start_time_utc, end_time_utc, status, room_number')
                 .gte('start_time_utc', startUtc)
                 .lte('start_time_utc', endUtc)
                 .order('start_time_utc', { ascending: true });
@@ -755,9 +755,9 @@ export default function Calendar() {
                                                                 const details = getSlotDetails(selectedDayIndex, hour, minute, roomNumber);
                                                                 const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
                                                                 
-                                                                let cellClass = '';
+                                                                let cellClass: string;
                                                                 let cellContent: React.ReactNode = null;
-                                                                let interactionProps = {};
+                                                                let interactionProps: { className: string; onClick?: () => void };
 
                                                                 if (details.status === 'Booked') {
                                                                     const prof = professionals.find(p => p.id === details.appointment!.professional_id);
@@ -834,9 +834,9 @@ export default function Calendar() {
                                                                 const details = getSlotDetails(selectedDayIndex, hour, minute);
                                                                 const timeString = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
                                                                 
-                                                                let cellClass = '';
+                                                                let cellClass: string;
                                                                 let cellContent: React.ReactNode = null;
-                                                                let interactionProps = {};
+                                                                let interactionProps: { className: string; onClick?: () => void };
 
                                                                 if (details.status === 'Booked') {
                                                                     const prof = professionals.find(p => p.id === details.appointment!.professional_id);

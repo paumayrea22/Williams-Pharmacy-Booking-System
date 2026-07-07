@@ -1,12 +1,21 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './Layout';
 import Calendar from './Calendar';
-import StaffManagement from './StaffManagement';
-import DoctorLeaveManagement from './DoctorLeaveManagement';
-import StressTest from './StressTest';
 import Login from './Login';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { PharmacistOnlyRoute } from './components/PharmacistOnlyRoute';
+
+// Secondary modules are code-split so a fresh login only downloads the Calendar bundle up front
+const StaffManagement = lazy(() => import('./StaffManagement'));
+const DoctorLeaveManagement = lazy(() => import('./DoctorLeaveManagement'));
+const StressTest = lazy(() => import('./StressTest'));
+
+const ModuleLoadingFallback = () => (
+    <div className="flex h-full w-full items-center justify-center bg-pharmacy-cream">
+        <p className="text-pharmacy-muted font-medium">Loading module...</p>
+    </div>
+);
 
 export default function App() {
     return (
@@ -21,10 +30,10 @@ export default function App() {
                     <Route element={<Layout />}>
                         <Route path="/" element={<Calendar />} />
                         <Route element={<PharmacistOnlyRoute />}>
-                            <Route path="/staff" element={<StaffManagement />} />
+                            <Route path="/staff" element={<Suspense fallback={<ModuleLoadingFallback />}><StaffManagement /></Suspense>} />
                         </Route>
-                        <Route path="/leaves" element={<DoctorLeaveManagement />} />
-                        <Route path="/stress-test" element={<StressTest />} />
+                        <Route path="/leaves" element={<Suspense fallback={<ModuleLoadingFallback />}><DoctorLeaveManagement /></Suspense>} />
+                        <Route path="/stress-test" element={<Suspense fallback={<ModuleLoadingFallback />}><StressTest /></Suspense>} />
                     </Route>
                 </Route>
 

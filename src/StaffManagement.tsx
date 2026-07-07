@@ -55,7 +55,7 @@ export default function StaffManagement() {
         try {
             const { data, error } = await supabase
                 .from('professionals')
-                .select('*')
+                .select('id, full_name, specialty, default_duration_minutes')
                 .order('id', { ascending: true });
 
             if (error) {
@@ -78,7 +78,7 @@ export default function StaffManagement() {
         try {
             const { data, error } = await supabase
                 .from('availabilities')
-                .select('*')
+                .select('id, professional_id, day_of_week, start_time, end_time')
                 .eq('professional_id', selectedProfessional)
                 .order('day_of_week', { ascending: true })
                 .order('start_time', { ascending: true });
@@ -97,7 +97,7 @@ export default function StaffManagement() {
         try {
             const { data, error } = await supabase
                 .from('rooms')
-                .select('*')
+                .select('id, room_number, label')
                 .order('room_number', { ascending: true });
 
             if (error) {
@@ -169,7 +169,7 @@ export default function StaffManagement() {
                 .from('professionals')
                 .update({ default_duration_minutes: newDurationMinutes })
                 .eq('id', professionalId)
-                .select();
+                .select('id');
 
             if (error) {
                 throw new Error(error.message);
@@ -281,7 +281,7 @@ export default function StaffManagement() {
         try {
             // .select() forces Postgres to report which rows were actually deleted, so a Row Level
             // Security denial (0 rows matched, error: null) can be detected instead of silently ignored
-            const { data, error } = await supabase.from('rooms').delete().eq('id', roomId).select();
+            const { data, error } = await supabase.from('rooms').delete().eq('id', roomId).select('id');
 
             if (error) {
                 // Postgres foreign_key_violation: this room is still referenced by appointment records
