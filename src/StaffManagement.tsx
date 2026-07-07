@@ -403,7 +403,7 @@ export default function StaffManagement() {
                                     type="text"
                                     value={newWhitelistUser}
                                     onChange={(e) => setNewWhitelistUser(e.target.value)}
-                                    placeholder="E.g. D-Fsadni or P-Ivan"
+                                    placeholder="E.g. D-Fsadni or P-Denisse"
                                     className="w-full border border-pharmacy-ink/20 rounded-lg p-2 text-sm shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold bg-white"
                                 />
                             </div>
