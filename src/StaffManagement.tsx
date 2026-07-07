@@ -1,7 +1,5 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './lib/supabase';
-import { DateTime } from 'luxon';
-import { getMaltaHolidays } from './holidays';
 import { useAuth } from './context/AuthContext';
 import { getErrorMessage } from './lib/errors';
 
@@ -362,12 +360,6 @@ export default function StaffManagement() {
         }
     };
 
-    const today = DateTime.local({ zone: 'Europe/Malta' }).startOf('day');
-    const upcomingHolidays = [
-        ...getMaltaHolidays(today.year),
-        ...getMaltaHolidays(today.year + 1)
-    ].filter(h => DateTime.fromISO(h.date, { zone: 'Europe/Malta' }) >= today);
-
     return (
         <div className="p-4 sm:p-6 bg-pharmacy-cream h-full overflow-y-auto custom-scrollbar flex flex-col gap-6 pb-16">
             <div className="shrink-0">
@@ -649,33 +641,6 @@ export default function StaffManagement() {
                             ))}
                         </ul>
                     )}
-                </div>
-            </div>
-
-            {/* Malta Public Holidays Panel */}
-            <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4 shrink-0">
-                <div className="border-b pb-2 border-pharmacy-cream-dark">
-                    <h2 className="font-display text-lg text-pharmacy-ink">Malta Public Holidays</h2>
-                    <p className="text-xs text-pharmacy-muted mt-0.5">
-                        Bookings are strictly blocked on these dates. The pharmacy permanently remains closed on Malta public holidays.
-                    </p>
-                </div>
-
-                <div className="max-h-72 overflow-y-auto border border-pharmacy-ink/10 rounded-lg custom-scrollbar pr-1">
-                    <ul className="divide-y divide-pharmacy-cream-dark">
-                        {upcomingHolidays.map(holiday => {
-                            return (
-                                <li key={holiday.date} className="p-3 text-xs flex justify-between items-center hover:bg-pharmacy-cream">
-                                    <div>
-                                        <span className="font-bold text-pharmacy-ink mr-2">
-                                            {DateTime.fromISO(holiday.date).toFormat('dd/MM/yyyy')}
-                                        </span>
-                                        <span className="text-pharmacy-muted">{holiday.name}</span>
-                                    </div>
-                                </li>
-                            );
-                        })}
-                    </ul>
                 </div>
             </div>
         </div>

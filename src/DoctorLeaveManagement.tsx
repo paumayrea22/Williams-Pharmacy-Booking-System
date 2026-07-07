@@ -3,6 +3,7 @@ import { supabase } from './lib/supabase';
 import { DateTime } from 'luxon';
 import { useAuth } from './context/AuthContext';
 import { getErrorMessage } from './lib/errors';
+import { getMaltaHolidays, getMaltaHolidayName } from './holidays';
 
 interface Professional {
     id: number;
@@ -147,6 +148,18 @@ export default function DoctorLeaveManagement() {
         }
 
         const dateISO = parsed.toISODate()!;
+        
+        if (getMaltaHolidayName(dateISO)) {
+            setErrorMessage('Validation Error: Target date is already blocked as a Malta public holiday.');
+            return;
+        }
+
+        const sqlDayOfWeek = parsed.weekday === 7 ? 0 : parsed.weekday;
+        if (!availabilities.some(a => a.day_of_week === sqlDayOfWeek)) {
+            setErrorMessage('Validation Error: Target professional has no active schedule for this day of the week.');
+            return;
+        }
+
         if (selectedDates.includes(dateISO)) {
             setErrorMessage('Validation Error: Target date is already present in the active batch.');
             return;
@@ -227,10 +240,18 @@ export default function DoctorLeaveManagement() {
             
             const isPast = dateObj < today;
             const isSunday = dateObj.weekday === 7;
-            const isDisabled = isPast || isSunday;
+            const isNationalHoliday = getMaltaHolidayName(dateISO) !== null;
+            
+            const sqlDayOfWeek = dateObj.weekday === 7 ? 0 : dateObj.weekday;
+            const worksOnThisDay = availabilities.some(a => a.day_of_week === sqlDayOfWeek);
+            
+            const isDisabled = isPast || isSunday || isNationalHoliday || !worksOnThisDay;
 
             let cellStyle = 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-semibold';
-            if (isDisabled) {
+            
+            if (isNationalHoliday) {
+                cellStyle = 'bg-purple-50 text-purple-600 border border-purple-200 cursor-not-allowed opacity-80 line-through';
+            } else if (isDisabled) {
                 cellStyle = 'bg-pharmacy-cream-dark text-pharmacy-muted cursor-not-allowed opacity-40 line-through';
             } else if (isSelected) {
                 cellStyle = 'bg-pharmacy-gold text-pharmacy-green shadow-md ring-2 ring-pharmacy-gold/40 font-bold scale-105';
@@ -242,6 +263,7 @@ export default function DoctorLeaveManagement() {
                     type="button"
                     disabled={isDisabled}
                     onClick={() => handleDateToggle(dateISO)}
+                    title={isNationalHoliday ? getMaltaHolidayName(dateISO)! : undefined}
                     className={`h-9 w-full rounded-md text-sm transition-all duration-150 ${cellStyle}`}
                 >
                     {i}
@@ -266,15 +288,22 @@ export default function DoctorLeaveManagement() {
         );
     };
 
+    // Calculate Malta public holidays strictly forward-looking
+    const currentToday = DateTime.local({ zone: 'Europe/Malta' }).startOf('day');
+    const upcomingHolidays = [
+        ...getMaltaHolidays(currentToday.year),
+        ...getMaltaHolidays(currentToday.year + 1)
+    ].filter(h => DateTime.fromISO(h.date, { zone: 'Europe/Malta' }) >= currentToday);
+
     return (
         <div className="p-4 sm:p-6 bg-pharmacy-cream h-screen overflow-y-auto custom-scrollbar flex flex-col gap-6 pb-16">
-            <div>
+            <div className="shrink-0">
                 <p className="text-xs font-semibold tracking-[0.2em] text-pharmacy-gold-dark uppercase">Vacation Controls</p>
                 <h1 className="font-display text-3xl text-pharmacy-ink">Manage Doctor Leave Schemes</h1>
             </div>
 
             {errorMessage && (
-                <div className="bg-red-50 border border-red-200 text-red-600 p-3 rounded-lg text-sm font-medium">
+                <div className="sticky top-0 z-10 bg-red-50 border border-red-200 text-red-600 p-3 rounded-lg text-sm font-medium shadow-md shrink-0">
                     {errorMessage}
                 </div>
             )}
@@ -369,36 +398,68 @@ export default function DoctorLeaveManagement() {
                     </form>
                 </div>
 
-                {/* Leaves List Panel */}
-                <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4 h-fit">
-                    <h2 className="font-display text-lg text-pharmacy-ink border-b pb-2 border-pharmacy-cream-dark">Active Vacation Slots</h2>
-                    
-                    <div className="overflow-y-auto max-h-[600px] border border-pharmacy-ink/10 rounded-lg custom-scrollbar">
-                        {leaves.length === 0 ? (
-                            <p className="text-xs text-pharmacy-muted p-4 text-center">No leave days currently registered for this scope.</p>
-                        ) : (
+                <div className="flex flex-col gap-6 h-fit">
+                    {/* Leaves List Panel */}
+                    <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4">
+                        <h2 className="font-display text-lg text-pharmacy-ink border-b pb-2 border-pharmacy-cream-dark">Active Vacation Slots</h2>
+                        
+                        <div className="overflow-y-auto max-h-[300px] border border-pharmacy-ink/10 rounded-lg custom-scrollbar">
+                            {leaves.length === 0 ? (
+                                <p className="text-xs text-pharmacy-muted p-4 text-center">No leave days currently registered for this scope.</p>
+                            ) : (
+                                <ul className="divide-y divide-pharmacy-cream-dark">
+                                    {leaves.map(l => (
+                                        <li key={l.id} className="p-3 text-xs flex justify-between items-center hover:bg-pharmacy-cream">
+                                            <div>
+                                                <span className="font-bold text-pharmacy-ink mr-2">
+                                                    {DateTime.fromISO(l.leave_date).toFormat('dd/MM/yyyy')}
+                                                </span>
+                                                <span className="text-pharmacy-muted">
+                                                    ({DateTime.fromISO(l.leave_date).toFormat('cccc')})
+                                                </span>
+                                            </div>
+                                            <button
+                                                onClick={() => handleDeleteLeave(l.id)}
+                                                disabled={isLoading}
+                                                className="text-red-700/80 font-bold hover:text-red-700 transition"
+                                            >
+                                                Delete
+                                            </button>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Malta Public Holidays Reference Panel */}
+                    <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4 shrink-0">
+                        <div className="border-b pb-2 border-pharmacy-cream-dark">
+                            <h2 className="font-display text-lg text-pharmacy-ink flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-purple-400 shrink-0"></span>
+                                Malta Public Holidays
+                            </h2>
+                            <p className="text-xs text-pharmacy-muted mt-0.5">
+                                Bookings are strictly blocked on these dates. The pharmacy permanently remains closed on Malta public holidays.
+                            </p>
+                        </div>
+
+                        <div className="max-h-72 overflow-y-auto border border-pharmacy-ink/10 rounded-lg custom-scrollbar pr-1">
                             <ul className="divide-y divide-pharmacy-cream-dark">
-                                {leaves.map(l => (
-                                    <li key={l.id} className="p-3 text-xs flex justify-between items-center hover:bg-pharmacy-cream">
-                                        <div>
-                                            <span className="font-bold text-pharmacy-ink mr-2">
-                                                {DateTime.fromISO(l.leave_date).toFormat('dd/MM/yyyy')}
-                                            </span>
-                                            <span className="text-pharmacy-muted">
-                                                ({DateTime.fromISO(l.leave_date).toFormat('cccc')})
-                                            </span>
-                                        </div>
-                                        <button
-                                            onClick={() => handleDeleteLeave(l.id)}
-                                            disabled={isLoading}
-                                            className="text-red-700/80 font-bold hover:text-red-700 transition"
-                                        >
-                                            Delete
-                                        </button>
-                                    </li>
-                                ))}
+                                {upcomingHolidays.map(holiday => {
+                                    return (
+                                        <li key={holiday.date} className="p-3 text-xs flex justify-between items-center hover:bg-pharmacy-cream">
+                                            <div>
+                                                <span className="font-bold text-pharmacy-ink mr-2">
+                                                    {DateTime.fromISO(holiday.date).toFormat('dd/MM/yyyy')}
+                                                </span>
+                                                <span className="text-pharmacy-muted">{holiday.name}</span>
+                                            </div>
+                                        </li>
+                                    );
+                                })}
                             </ul>
-                        )}
+                        </div>
                     </div>
                 </div>
             </div>
