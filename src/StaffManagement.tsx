@@ -369,21 +369,21 @@ export default function StaffManagement() {
     ].filter(h => DateTime.fromISO(h.date, { zone: 'Europe/Malta' }) >= today);
 
     return (
-        <div className="p-4 sm:p-6 bg-pharmacy-cream h-screen overflow-y-auto custom-scrollbar flex flex-col gap-6 pb-16">
-            <div>
+        <div className="p-4 sm:p-6 bg-pharmacy-cream h-full overflow-y-auto custom-scrollbar flex flex-col gap-6 pb-16">
+            <div className="shrink-0">
                 <p className="text-xs font-semibold tracking-[0.2em] text-pharmacy-gold-dark uppercase">Staff Management</p>
                 <h1 className="font-display text-3xl text-pharmacy-ink">Register specialists and schedules</h1>
             </div>
 
             {errorMessage && (
-                <div className="sticky top-0 z-10 bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-sm font-medium shadow-md">
+                <div className="sticky top-0 z-10 bg-red-50 border border-red-200 text-red-700 p-3 rounded-lg text-sm font-medium shadow-md shrink-0">
                     {errorMessage}
                 </div>
             )}
 
             {/* Zero Trust Authentication Whitelist (Admin Only) */}
             {role === 'pharmacist' && (
-                <div className="bg-white border border-red-200/60 p-5 rounded-xl shadow-sm flex flex-col gap-4 relative overflow-hidden">
+                <div className="bg-white border border-red-200/60 p-5 rounded-xl shadow-sm flex flex-col gap-4 relative overflow-hidden shrink-0">
                     <div className="absolute top-0 left-0 w-1 h-full bg-red-600/80"></div>
                     <div className="border-b pb-2 border-pharmacy-cream-dark flex justify-between items-end">
                         <div>
@@ -452,7 +452,7 @@ export default function StaffManagement() {
                 </div>
             )}
 
-            <div className="grid gap-6 md:grid-cols-2">
+            <div className="grid gap-6 md:grid-cols-2 shrink-0">
                 {/* Specialist Registration Panel */}
                 <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4">
                     <h2 className="font-display text-lg text-pharmacy-ink border-b pb-2 border-pharmacy-cream-dark">Register New Doctor</h2>
@@ -602,7 +602,7 @@ export default function StaffManagement() {
             </div>
 
             {/* Clinic Room Management Panel */}
-            <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4">
+            <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4 shrink-0">
                 <div className="border-b pb-2 border-pharmacy-cream-dark">
                     <h2 className="font-display text-lg text-pharmacy-ink">Clinic Rooms</h2>
                     <p className="text-xs text-pharmacy-muted mt-0.5">
@@ -653,7 +653,7 @@ export default function StaffManagement() {
             </div>
 
             {/* Malta Public Holidays Panel */}
-            <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4">
+            <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4 shrink-0">
                 <div className="border-b pb-2 border-pharmacy-cream-dark">
                     <h2 className="font-display text-lg text-pharmacy-ink">Malta Public Holidays</h2>
                     <p className="text-xs text-pharmacy-muted mt-0.5">
