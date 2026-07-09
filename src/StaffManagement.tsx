@@ -435,7 +435,8 @@ export default function StaffManagement() {
                         </div>
                     </div>
                     
-                    <div className="grid gap-6 md:grid-cols-2">
+                    {/* Contenedor Grid con items-start para evitar que las columnas se estiren juntas */}
+                    <div className="grid gap-6 md:grid-cols-2 items-start">
                         <form onSubmit={authorizeSystemAccess} className="flex flex-col gap-4 bg-red-50/40 p-4 rounded-lg border border-red-100">
                             <div>
                                 <label className="block text-sm font-semibold text-pharmacy-ink mb-1">Target Username</label>
@@ -467,7 +468,8 @@ export default function StaffManagement() {
                             </button>
                         </form>
 
-                        <div className="overflow-y-auto h-full min-h-0 border border-pharmacy-ink/10 rounded-lg custom-scrollbar">
+                        {/* Contenedor con altura máxima estricta (max-h-[232px]) para forzar el scrollbar interno */}
+                        <div className="overflow-y-auto max-h-[232px] w-full border border-pharmacy-ink/10 rounded-lg bg-white custom-scrollbar">
                             <ul className="divide-y divide-pharmacy-cream-dark">
                                 {whitelist.length === 0 ? (
                                     <li className="p-4 text-xs text-center text-pharmacy-muted italic">No authorized users found.</li>
