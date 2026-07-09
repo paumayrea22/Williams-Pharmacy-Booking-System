@@ -16,20 +16,35 @@ interface BeforeInstallPromptEvent extends Event {
 export default function Layout() {
     const location = useLocation();
     const navigate = useNavigate();
-    const { username, role } = useAuth(); // Sealed role read from app_metadata, never user_metadata
+    
+    // Sealed role read from app_metadata, never user_metadata for security
+    const { username, role } = useAuth(); 
 
+    // UI Layout States
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
     
-    // States to handle the PWA installation lifecycle
+    // PWA Installation States
     const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
     const [isInstallable, setIsInstallable] = useState(false);
+
+    // Calendar Sync Modal States
+    const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+    const [isSyncLoading, setIsSyncLoading] = useState(false);
+    const [professionalId, setProfessionalId] = useState<number | null>(null);
+    
+    // Sync Preferences States
+    const [syncEnabled, setSyncEnabled] = useState(false);
+    const [syncEmail, setSyncEmail] = useState('');
+    const [syncGoogle, setSyncGoogle] = useState(false);
+    const [syncApple, setSyncApple] = useState(false);
+    const [syncToken, setSyncToken] = useState<string | null>(null);
 
     const displayUsername = username ?? 'User';
     const displayRole = role ? role.toUpperCase() : 'STAFF';
 
+    // Intercept the browser's native PWA installation prompt
     useEffect(() => {
-        // Intercept the browser's native installation prompt
         const handleBeforeInstallPrompt = (e: Event) => {
             e.preventDefault();
             setDeferredPrompt(e as BeforeInstallPromptEvent);
@@ -51,6 +66,93 @@ export default function Layout() {
             window.removeEventListener('appinstalled', handleAppInstalled);
         };
     }, []);
+
+    // Fetch professional ID and existing sync settings when the modal is opened
+    useEffect(() => {
+        if (isSyncModalOpen && role === 'doctor' && username) {
+            const fetchSyncData = async () => {
+                setIsSyncLoading(true);
+                try {
+                    // 1. Extract the unique name identifier and resolve the numeric Professional ID
+                    const doctorNameSuffix = username.split('-')[1];
+                    const { data: profData, error: profError } = await supabase
+                        .from('professionals')
+                        .select('id')
+                        .ilike('full_name', `%${doctorNameSuffix}%`)
+                        .limit(1)
+                        .single();
+
+                    if (profError) throw profError;
+
+                    if (profData) {
+                        setProfessionalId(profData.id);
+                        
+                        // 2. Fetch existing synchronization preferences from the persistence table
+                        const { data: syncData, error: syncError } = await supabase
+                            .from('calendar_sync_settings')
+                            .select('*')
+                            .eq('professional_id', profData.id)
+                            .maybeSingle();
+
+                        if (syncError) throw syncError;
+
+                        if (syncData) {
+                            setSyncEnabled(syncData.sync_enabled);
+                            setSyncEmail(syncData.target_email || '');
+                            setSyncGoogle(syncData.sync_google);
+                            setSyncApple(syncData.sync_apple);
+                            setSyncToken(syncData.secure_token);
+                        } else {
+                            // If no record exists, try to prefill the email from the auth context as a UX courtesy
+                            const { data: authData } = await supabase.auth.getUser();
+                            if (authData.user?.email) {
+                                setSyncEmail(authData.user.email);
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('Infrastructure error loading synchronization settings:', error);
+                } finally {
+                    setIsSyncLoading(false);
+                }
+            };
+            fetchSyncData();
+        }
+    }, [isSyncModalOpen, role, username]);
+
+    // Upsert the synchronization preferences securely into the database
+    const handleSaveSyncSettings = async () => {
+        if (!professionalId) return;
+        setIsSyncLoading(true);
+
+        try {
+            const payload = {
+                professional_id: professionalId,
+                sync_enabled: syncEnabled,
+                target_email: syncEmail,
+                sync_google: syncGoogle,
+                sync_apple: syncApple,
+                updated_at: new Date().toISOString()
+            };
+
+            const { data, error } = await supabase
+                .from('calendar_sync_settings')
+                .upsert(payload)
+                .select('secure_token')
+                .single();
+
+            if (error) throw error;
+            
+            if (data) {
+                setSyncToken(data.secure_token);
+            }
+        } catch (error) {
+            console.error('Error saving sync settings:', error);
+            alert('An infrastructure error occurred while saving your preferences. Please try again.');
+        } finally {
+            setIsSyncLoading(false);
+        }
+    };
 
     const handleInstallClick = async () => {
         if (!deferredPrompt) return;
@@ -75,8 +177,135 @@ export default function Layout() {
 
     const closeMobileDrawer = () => setIsMobileDrawerOpen(false);
 
+    // Dynamically generate the WebCal subscription URL using the current host to prevent hardcoding issues
+    const hostname = window.location.host;
+    const generatedWebcalUrl = syncToken ? `webcal://${hostname}/api/calendar?token=${syncToken}` : '';
+
     return (
         <div className="relative flex h-screen w-screen bg-pharmacy-cream overflow-hidden font-sans">
+
+            {/* Sync Configuration Modal Overlay (High z-index to overlay sidebar) */}
+            {isSyncModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-pharmacy-ink/40 backdrop-blur-sm p-4">
+                    <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+                        <div className="p-6 border-b border-pharmacy-cream-dark">
+                            <div className="flex justify-between items-center">
+                                <h2 className="font-display text-2xl text-pharmacy-ink">Calendar Synchronization</h2>
+                                <button 
+                                    onClick={() => setIsSyncModalOpen(false)} 
+                                    aria-label="Close modal"
+                                    className="text-pharmacy-muted hover:text-pharmacy-ink text-xl font-bold transition-colors"
+                                >
+                                    &times;
+                                </button>
+                            </div>
+                            <p className="text-sm text-pharmacy-muted mt-2">
+                                Connect your clinic appointments securely with your personal device. Data flows automatically and avoids duplicates.
+                            </p>
+                        </div>
+
+                        <div className="p-6 flex flex-col gap-6 overflow-y-auto max-h-[70vh] custom-scrollbar">
+                            {isSyncLoading ? (
+                                <div className="text-center text-pharmacy-muted py-8 font-bold animate-pulse">Loading secure preferences...</div>
+                            ) : (
+                                <>
+                                    {/* Master Enable/Disable Toggle */}
+                                    <div className="flex items-center justify-between bg-pharmacy-cream p-4 rounded-xl border border-pharmacy-ink/10">
+                                        <div>
+                                            <span className="font-bold text-pharmacy-ink block">Enable Synchronization</span>
+                                            <span className="text-xs text-pharmacy-muted">Turn off to instantly halt event pushing without deleting past history.</span>
+                                        </div>
+                                        <button 
+                                            onClick={() => setSyncEnabled(!syncEnabled)}
+                                            aria-pressed={syncEnabled}
+                                            className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${syncEnabled ? 'bg-pharmacy-green' : 'bg-gray-300'}`}
+                                        >
+                                            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${syncEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                                        </button>
+                                    </div>
+
+                                    {/* Settings Configuration Form */}
+                                    <div className={`flex flex-col gap-4 transition-opacity ${syncEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
+                                        <div>
+                                            <label className="block text-sm font-semibold text-pharmacy-ink mb-1">Target Account Email</label>
+                                            <input 
+                                                type="email" 
+                                                value={syncEmail}
+                                                onChange={(e) => setSyncEmail(e.target.value)}
+                                                placeholder="e.g. doctor@gmail.com"
+                                                className="w-full border border-pharmacy-ink/20 rounded-lg p-2.5 text-sm shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold"
+                                            />
+                                        </div>
+
+                                        <div>
+                                            <label className="block text-sm font-semibold text-pharmacy-ink mb-2">Select Target Platforms</label>
+                                            <div className="flex gap-4">
+                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                    <input 
+                                                        type="checkbox" 
+                                                        checked={syncGoogle} 
+                                                        onChange={(e) => setSyncGoogle(e.target.checked)} 
+                                                        className="w-4 h-4 text-pharmacy-green rounded focus:ring-pharmacy-green" 
+                                                    />
+                                                    <span className="text-sm font-medium text-pharmacy-ink">Google Calendar</span>
+                                                </label>
+                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                    <input 
+                                                        type="checkbox" 
+                                                        checked={syncApple} 
+                                                        onChange={(e) => setSyncApple(e.target.checked)} 
+                                                        className="w-4 h-4 text-pharmacy-green rounded focus:ring-pharmacy-green" 
+                                                    />
+                                                    <span className="text-sm font-medium text-pharmacy-ink">Apple Calendar</span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                        
+                                        {/* Dynamic Subscription Instructions Panel */}
+                                        {syncToken && syncEnabled && (syncGoogle || syncApple) && (
+                                            <div className="mt-2 bg-emerald-50 border border-emerald-200 p-4 rounded-xl flex flex-col gap-3">
+                                                <h3 className="font-bold text-emerald-800 text-sm">Action Required</h3>
+                                                <p className="text-xs text-emerald-700">Due to external security policies, you must add the following secure feed URL to your calendar app manually:</p>
+                                                <div className="bg-white border border-emerald-200 rounded p-2 text-[10px] font-mono break-all text-gray-600 select-all cursor-text">
+                                                    {generatedWebcalUrl}
+                                                </div>
+                                                
+                                                {syncApple && (
+                                                    <div className="text-xs text-emerald-800 bg-emerald-100/50 p-2 rounded">
+                                                        <span className="font-bold">Apple:</span> On an iPhone/Mac, simply click or copy the link above and open it in Safari. The system will prompt you to subscribe automatically.
+                                                    </div>
+                                                )}
+                                                
+                                                {syncGoogle && (
+                                                    <div className="text-xs text-emerald-800 bg-emerald-100/50 p-2 rounded">
+                                                        <span className="font-bold">Google:</span> Open Google Calendar on a PC &gt; Settings &gt; Add Calendar &gt; "From URL" &gt; Paste the link above.
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        <div className="p-4 border-t border-pharmacy-cream-dark bg-gray-50 flex justify-end gap-3 shrink-0 rounded-b-2xl">
+                            <button 
+                                onClick={() => setIsSyncModalOpen(false)} 
+                                className="px-5 py-2.5 rounded-lg text-sm font-bold text-pharmacy-muted hover:bg-gray-200 transition"
+                            >
+                                Cancel
+                            </button>
+                            <button 
+                                onClick={handleSaveSyncSettings} 
+                                disabled={isSyncLoading || (syncEnabled && !syncEmail.trim())} 
+                                className="bg-pharmacy-green text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-pharmacy-green-light transition shadow-md disabled:opacity-50"
+                            >
+                                {isSyncLoading ? 'Saving...' : 'Save Preferences'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Dimmed backdrop behind the mobile drawer; tapping it closes the menu */}
             {isMobileDrawerOpen && (
@@ -123,7 +352,7 @@ export default function Layout() {
                                 Calendar
                             </Link>
 
-                            {/* Link to the staff management module; hidden for doctors, who are also blocked at the route level */}
+                            {/* Link to the staff management module; hidden for doctors */}
                             {role !== 'doctor' && (
                                 <Link
                                     to="/staff"
@@ -136,7 +365,6 @@ export default function Layout() {
                                 </Link>
                             )}
 
-                            {/* Link to the dynamic doctor vacations management module */}
                             <Link
                                 to="/leaves"
                                 onClick={closeMobileDrawer}
@@ -150,6 +378,19 @@ export default function Layout() {
                     </div>
 
                     <div className="p-4 flex flex-col gap-2">
+                        {/* Calendar Synchronization Button (Exclusive for Doctors) */}
+                        {role === 'doctor' && (
+                            <button
+                                onClick={() => setIsSyncModalOpen(true)}
+                                className="w-full flex items-center gap-2 px-4 py-3 rounded-lg text-sm font-semibold text-pharmacy-cream/90 hover:bg-pharmacy-green-light hover:text-white transition-colors border border-pharmacy-green-light/50 bg-pharmacy-green-light/20"
+                            >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path>
+                                </svg>
+                                Sync with Calendar
+                            </button>
+                        )}
+
                         {/* Dynamic PWA Installation Button (Renders only if supported and not installed) */}
                         {isInstallable && (
                             <button
