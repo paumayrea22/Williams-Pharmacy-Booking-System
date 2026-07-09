@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
-import { getErrorMessage } from './lib/errors';
 
 export default function Login() {
     const [isRegistering, setIsRegistering] = useState(false);
@@ -24,7 +23,7 @@ export default function Login() {
                 const prefixRegex = /^(D-|P-).+$/;
                 
                 if (!prefixRegex.test(username)) {
-                    throw new Error('Error: Username must strictly start with "D-" (Doctor) or "P-" (Pharmacy). Ex: P-Denisse');
+                    throw new Error('Validation Error: Username must strictly start with "D-" (Doctor) or "P-" (Pharmacy). Ex: P-Denisse');
                 }
 
                 // Register in Supabase injecting the username. The SQL Trigger will assign the immutable role.
@@ -39,7 +38,7 @@ export default function Login() {
                 });
 
                 if (authError) {
-                    throw new Error(authError.message);
+                    throw authError;
                 }
                 
                 navigate('/');
@@ -56,9 +55,10 @@ export default function Login() {
                 
                 navigate('/');
             }
-        } catch (error) {
-            // Catch generic exceptions and errors delegated by Supabase
-            setErrorMessage(getErrorMessage(error, 'An unexpected network error occurred.'));
+        } catch (error: any) {
+            // Safely extract deeply nested Supabase Auth and Postgres Trigger errors
+            const extractedMessage = error?.message || error?.error_description || error?.msg || 'Unauthorized: You are not whitelisted in the system or an unexpected error occurred.';
+            setErrorMessage(extractedMessage);
         } finally {
             // Guaranteed UI unlock regardless of the result
             setIsProcessing(false);
@@ -73,7 +73,7 @@ export default function Login() {
                 </h2>
 
                 {errorMessage && (
-                    <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                    <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700 shadow-sm">
                         {errorMessage}
                     </div>
                 )}
@@ -124,7 +124,7 @@ export default function Login() {
                     <button
                         type="submit"
                         disabled={isProcessing}
-                        className={`w-full rounded-md p-3 font-semibold transition ${
+                        className={`w-full rounded-md p-3 font-semibold transition shadow-md ${
                             isProcessing ? 'bg-gray-300 text-white cursor-not-allowed' : 'bg-pharmacy-gold text-pharmacy-green hover:bg-pharmacy-gold-dark hover:text-white'
                         }`}
                     >
@@ -139,7 +139,7 @@ export default function Login() {
                             setErrorMessage('');
                         }}
                         disabled={isProcessing}
-                        className="text-sm text-pharmacy-gold-dark hover:underline disabled:text-gray-400"
+                        className="text-sm text-pharmacy-gold-dark hover:underline disabled:text-gray-400 font-medium"
                     >
                         {isRegistering ? 'Already have an account? Sign in' : 'First time? Create your password'}
                     </button>

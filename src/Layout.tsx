@@ -16,14 +16,14 @@ interface BeforeInstallPromptEvent extends Event {
 export default function Layout() {
     const location = useLocation();
     const navigate = useNavigate();
-    
+
     // Sealed role read from app_metadata, never user_metadata for security
-    const { username, role } = useAuth(); 
+    const { username, role } = useAuth();
 
     // UI Layout States
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
     const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
-    
+
     // PWA Installation States
     const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
     const [isInstallable, setIsInstallable] = useState(false);
@@ -31,8 +31,9 @@ export default function Layout() {
     // Calendar Sync Modal States
     const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
     const [isSyncLoading, setIsSyncLoading] = useState(false);
+    const [syncErrorMsg, setSyncErrorMsg] = useState('');
     const [professionalId, setProfessionalId] = useState<number | null>(null);
-    
+
     // Sync Preferences States
     const [syncEnabled, setSyncEnabled] = useState(false);
     const [syncEmail, setSyncEmail] = useState('');
@@ -72,6 +73,8 @@ export default function Layout() {
         if (isSyncModalOpen && role === 'doctor' && username) {
             const fetchSyncData = async () => {
                 setIsSyncLoading(true);
+                setSyncErrorMsg('');
+
                 try {
                     // 1. Extract the unique name identifier and resolve the numeric Professional ID
                     const doctorNameSuffix = username.split('-')[1];
@@ -79,39 +82,44 @@ export default function Layout() {
                         .from('professionals')
                         .select('id')
                         .ilike('full_name', `%${doctorNameSuffix}%`)
-                        .limit(1)
-                        .single();
+                        .maybeSingle();
 
                     if (profError) throw profError;
 
-                    if (profData) {
-                        setProfessionalId(profData.id);
-                        
-                        // 2. Fetch existing synchronization preferences from the persistence table
-                        const { data: syncData, error: syncError } = await supabase
-                            .from('calendar_sync_settings')
-                            .select('*')
-                            .eq('professional_id', profData.id)
-                            .maybeSingle();
+                    // Data Integrity Check: If the Pharmacist hasn't registered this doctor's profile yet
+                    if (!profData) {
+                        setSyncErrorMsg(`Data Linkage Failed: No medical profile found matching "${doctorNameSuffix}". Please ask the Administrator to register your full name in Staff Management before configuring synchronization.`);
+                        return;
+                    }
 
-                        if (syncError) throw syncError;
+                    setProfessionalId(profData.id);
 
-                        if (syncData) {
-                            setSyncEnabled(syncData.sync_enabled);
-                            setSyncEmail(syncData.target_email || '');
-                            setSyncGoogle(syncData.sync_google);
-                            setSyncApple(syncData.sync_apple);
-                            setSyncToken(syncData.secure_token);
-                        } else {
-                            // If no record exists, try to prefill the email from the auth context as a UX courtesy
-                            const { data: authData } = await supabase.auth.getUser();
-                            if (authData.user?.email) {
-                                setSyncEmail(authData.user.email);
-                            }
+                    // 2. Fetch existing synchronization preferences from the persistence table
+                    const { data: syncData, error: syncError } = await supabase
+                        .from('calendar_sync_settings')
+                        .select('*')
+                        .eq('professional_id', profData.id)
+                        .maybeSingle();
+
+                    if (syncError) throw syncError;
+
+                    if (syncData) {
+                        setSyncEnabled(syncData.sync_enabled);
+                        setSyncEmail(syncData.target_email || '');
+                        setSyncGoogle(syncData.sync_google);
+                        setSyncApple(syncData.sync_apple);
+                        setSyncToken(syncData.secure_token);
+                    } else {
+                        // If no record exists, try to prefill the email from the auth context as a UX courtesy
+                        const { data: authData } = await supabase.auth.getUser();
+                        if (authData.user?.email) {
+                            setSyncEmail(authData.user.email);
                         }
                     }
+
                 } catch (error) {
                     console.error('Infrastructure error loading synchronization settings:', error);
+                    setSyncErrorMsg('An unexpected infrastructure error occurred while loading your preferences.');
                 } finally {
                     setIsSyncLoading(false);
                 }
@@ -124,6 +132,7 @@ export default function Layout() {
     const handleSaveSyncSettings = async () => {
         if (!professionalId) return;
         setIsSyncLoading(true);
+        setSyncErrorMsg('');
 
         try {
             const payload = {
@@ -142,13 +151,13 @@ export default function Layout() {
                 .single();
 
             if (error) throw error;
-            
+
             if (data) {
                 setSyncToken(data.secure_token);
             }
         } catch (error) {
             console.error('Error saving sync settings:', error);
-            alert('An infrastructure error occurred while saving your preferences. Please try again.');
+            setSyncErrorMsg('An infrastructure error occurred while saving your preferences. Please try again.');
         } finally {
             setIsSyncLoading(false);
         }
@@ -156,11 +165,7 @@ export default function Layout() {
 
     const handleInstallClick = async () => {
         if (!deferredPrompt) return;
-        
-        // Trigger the native installation dialog programmatically
         await deferredPrompt.prompt();
-        
-        // Wait for the user's resolution
         const { outcome } = await deferredPrompt.userChoice;
         if (outcome === 'accepted') {
             setIsInstallable(false);
@@ -169,9 +174,7 @@ export default function Layout() {
     };
 
     const handleSignOut = async () => {
-        // Destroy the JWT token on the server and clear local storage
         await supabase.auth.signOut();
-        // ProtectedRoute will detect the dropped session, but we force navigation for UX
         navigate('/login');
     };
 
@@ -184,15 +187,15 @@ export default function Layout() {
     return (
         <div className="relative flex h-screen w-screen bg-pharmacy-cream overflow-hidden font-sans">
 
-            {/* Sync Configuration Modal Overlay (High z-index to overlay sidebar) */}
+            {/* Sync Configuration Modal Overlay */}
             {isSyncModalOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-pharmacy-ink/40 backdrop-blur-sm p-4">
                     <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col overflow-hidden">
                         <div className="p-6 border-b border-pharmacy-cream-dark">
                             <div className="flex justify-between items-center">
                                 <h2 className="font-display text-2xl text-pharmacy-ink">Calendar Synchronization</h2>
-                                <button 
-                                    onClick={() => setIsSyncModalOpen(false)} 
+                                <button
+                                    onClick={() => setIsSyncModalOpen(false)}
                                     aria-label="Close modal"
                                     className="text-pharmacy-muted hover:text-pharmacy-ink text-xl font-bold transition-colors"
                                 >
@@ -207,15 +210,19 @@ export default function Layout() {
                         <div className="p-6 flex flex-col gap-6 overflow-y-auto max-h-[70vh] custom-scrollbar">
                             {isSyncLoading ? (
                                 <div className="text-center text-pharmacy-muted py-8 font-bold animate-pulse">Loading secure preferences...</div>
+                            ) : syncErrorMsg ? (
+                                <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl text-sm font-medium shadow-sm">
+                                    <span className="font-bold block mb-1">Authorization Blocked</span>
+                                    {syncErrorMsg}
+                                </div>
                             ) : (
                                 <>
-                                    {/* Master Enable/Disable Toggle */}
                                     <div className="flex items-center justify-between bg-pharmacy-cream p-4 rounded-xl border border-pharmacy-ink/10">
                                         <div>
                                             <span className="font-bold text-pharmacy-ink block">Enable Synchronization</span>
                                             <span className="text-xs text-pharmacy-muted">Turn off to instantly halt event pushing without deleting past history.</span>
                                         </div>
-                                        <button 
+                                        <button
                                             onClick={() => setSyncEnabled(!syncEnabled)}
                                             aria-pressed={syncEnabled}
                                             className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${syncEnabled ? 'bg-pharmacy-green' : 'bg-gray-300'}`}
@@ -224,12 +231,11 @@ export default function Layout() {
                                         </button>
                                     </div>
 
-                                    {/* Settings Configuration Form */}
                                     <div className={`flex flex-col gap-4 transition-opacity ${syncEnabled ? 'opacity-100' : 'opacity-40 pointer-events-none'}`}>
                                         <div>
                                             <label className="block text-sm font-semibold text-pharmacy-ink mb-1">Target Account Email</label>
-                                            <input 
-                                                type="email" 
+                                            <input
+                                                type="email"
                                                 value={syncEmail}
                                                 onChange={(e) => setSyncEmail(e.target.value)}
                                                 placeholder="e.g. doctor@gmail.com"
@@ -241,27 +247,26 @@ export default function Layout() {
                                             <label className="block text-sm font-semibold text-pharmacy-ink mb-2">Select Target Platforms</label>
                                             <div className="flex gap-4">
                                                 <label className="flex items-center gap-2 cursor-pointer">
-                                                    <input 
-                                                        type="checkbox" 
-                                                        checked={syncGoogle} 
-                                                        onChange={(e) => setSyncGoogle(e.target.checked)} 
-                                                        className="w-4 h-4 text-pharmacy-green rounded focus:ring-pharmacy-green" 
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={syncGoogle}
+                                                        onChange={(e) => setSyncGoogle(e.target.checked)}
+                                                        className="w-4 h-4 text-pharmacy-green rounded focus:ring-pharmacy-green"
                                                     />
                                                     <span className="text-sm font-medium text-pharmacy-ink">Google Calendar</span>
                                                 </label>
                                                 <label className="flex items-center gap-2 cursor-pointer">
-                                                    <input 
-                                                        type="checkbox" 
-                                                        checked={syncApple} 
-                                                        onChange={(e) => setSyncApple(e.target.checked)} 
-                                                        className="w-4 h-4 text-pharmacy-green rounded focus:ring-pharmacy-green" 
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={syncApple}
+                                                        onChange={(e) => setSyncApple(e.target.checked)}
+                                                        className="w-4 h-4 text-pharmacy-green rounded focus:ring-pharmacy-green"
                                                     />
                                                     <span className="text-sm font-medium text-pharmacy-ink">Apple Calendar</span>
                                                 </label>
                                             </div>
                                         </div>
-                                        
-                                        {/* Dynamic Subscription Instructions Panel */}
+
                                         {syncToken && syncEnabled && (syncGoogle || syncApple) && (
                                             <div className="mt-2 bg-emerald-50 border border-emerald-200 p-4 rounded-xl flex flex-col gap-3">
                                                 <h3 className="font-bold text-emerald-800 text-sm">Action Required</h3>
@@ -269,16 +274,25 @@ export default function Layout() {
                                                 <div className="bg-white border border-emerald-200 rounded p-2 text-[10px] font-mono break-all text-gray-600 select-all cursor-text">
                                                     {generatedWebcalUrl}
                                                 </div>
-                                                
+
                                                 {syncApple && (
                                                     <div className="text-xs text-emerald-800 bg-emerald-100/50 p-2 rounded">
                                                         <span className="font-bold">Apple:</span> On an iPhone/Mac, simply click or copy the link above and open it in Safari. The system will prompt you to subscribe automatically.
                                                     </div>
                                                 )}
-                                                
+
                                                 {syncGoogle && (
-                                                    <div className="text-xs text-emerald-800 bg-emerald-100/50 p-2 rounded">
-                                                        <span className="font-bold">Google:</span> Open Google Calendar on a PC &gt; Settings &gt; Add Calendar &gt; "From URL" &gt; Paste the link above.
+                                                    <div className="text-xs text-emerald-800 bg-emerald-100/50 p-3 rounded flex flex-col gap-2">
+                                                        <p>
+                                                            <span className="font-bold">Google:</span> Open Google Calendar on a PC &gt; Settings &gt; Add Calendar &gt; "From URL" &gt; Paste the link above.
+                                                        </p>
+                                                        <div className="bg-amber-100 text-amber-900 p-2 rounded border border-amber-200">
+                                                            <span className="font-bold flex items-center gap-1">
+                                                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                                                                Google Calendar Latency Warning
+                                                            </span>
+                                                            <p className="mt-1">Initial setup is instant, but Google servers only refresh external calendars every 12-24 hours. For real-time updates, always rely on this portal.</p>
+                                                        </div>
                                                     </div>
                                                 )}
                                             </div>
@@ -289,15 +303,15 @@ export default function Layout() {
                         </div>
 
                         <div className="p-4 border-t border-pharmacy-cream-dark bg-gray-50 flex justify-end gap-3 shrink-0 rounded-b-2xl">
-                            <button 
-                                onClick={() => setIsSyncModalOpen(false)} 
+                            <button
+                                onClick={() => setIsSyncModalOpen(false)}
                                 className="px-5 py-2.5 rounded-lg text-sm font-bold text-pharmacy-muted hover:bg-gray-200 transition"
                             >
                                 Cancel
                             </button>
-                            <button 
-                                onClick={handleSaveSyncSettings} 
-                                disabled={isSyncLoading || (syncEnabled && !syncEmail.trim())} 
+                            <button
+                                onClick={handleSaveSyncSettings}
+                                disabled={isSyncLoading || !!syncErrorMsg || (syncEnabled && !syncEmail.trim())}
                                 className="bg-pharmacy-green text-white px-6 py-2.5 rounded-lg text-sm font-bold hover:bg-pharmacy-green-light transition shadow-md disabled:opacity-50"
                             >
                                 {isSyncLoading ? 'Saving...' : 'Save Preferences'}
@@ -307,7 +321,6 @@ export default function Layout() {
                 </div>
             )}
 
-            {/* Dimmed backdrop behind the mobile drawer; tapping it closes the menu */}
             {isMobileDrawerOpen && (
                 <div
                     onClick={closeMobileDrawer}
@@ -316,7 +329,6 @@ export default function Layout() {
                 ></div>
             )}
 
-            {/* Navigation sidebar: overlay drawer on mobile, horizontally collapsible in-flow panel on desktop */}
             <aside
                 className={`bg-pharmacy-green text-pharmacy-cream flex flex-col justify-between shrink-0 shadow-xl overflow-hidden transition-all duration-300
                     fixed inset-y-0 left-0 z-40 w-64 ${isMobileDrawerOpen ? 'translate-x-0' : '-translate-x-full'}
@@ -345,21 +357,18 @@ export default function Layout() {
                             <Link
                                 to="/"
                                 onClick={closeMobileDrawer}
-                                className={`px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${
-                                    location.pathname === '/' ? 'bg-pharmacy-green-light text-white shadow-inner' : 'text-pharmacy-cream/70 hover:bg-pharmacy-green-light/60 hover:text-white'
-                                }`}
+                                className={`px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${location.pathname === '/' ? 'bg-pharmacy-green-light text-white shadow-inner' : 'text-pharmacy-cream/70 hover:bg-pharmacy-green-light/60 hover:text-white'
+                                    }`}
                             >
                                 Calendar
                             </Link>
 
-                            {/* Link to the staff management module; hidden for doctors */}
                             {role !== 'doctor' && (
                                 <Link
                                     to="/staff"
                                     onClick={closeMobileDrawer}
-                                    className={`px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${
-                                        location.pathname === '/staff' ? 'bg-pharmacy-green-light text-white shadow-inner' : 'text-pharmacy-cream/70 hover:bg-pharmacy-green-light/60 hover:text-white'
-                                    }`}
+                                    className={`px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${location.pathname === '/staff' ? 'bg-pharmacy-green-light text-white shadow-inner' : 'text-pharmacy-cream/70 hover:bg-pharmacy-green-light/60 hover:text-white'
+                                        }`}
                                 >
                                     Staff Management
                                 </Link>
@@ -368,9 +377,8 @@ export default function Layout() {
                             <Link
                                 to="/leaves"
                                 onClick={closeMobileDrawer}
-                                className={`px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${
-                                    location.pathname === '/leaves' ? 'bg-pharmacy-green-light text-white shadow-inner' : 'text-pharmacy-cream/70 hover:bg-pharmacy-green-light/60 hover:text-white'
-                                }`}
+                                className={`px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${location.pathname === '/leaves' ? 'bg-pharmacy-green-light text-white shadow-inner' : 'text-pharmacy-cream/70 hover:bg-pharmacy-green-light/60 hover:text-white'
+                                    }`}
                             >
                                 Doctor Leaves
                             </Link>
@@ -378,7 +386,6 @@ export default function Layout() {
                     </div>
 
                     <div className="p-4 flex flex-col gap-2">
-                        {/* Calendar Synchronization Button (Exclusive for Doctors) */}
                         {role === 'doctor' && (
                             <button
                                 onClick={() => setIsSyncModalOpen(true)}
@@ -391,7 +398,6 @@ export default function Layout() {
                             </button>
                         )}
 
-                        {/* Dynamic PWA Installation Button (Renders only if supported and not installed) */}
                         {isInstallable && (
                             <button
                                 onClick={handleInstallClick}
@@ -417,13 +423,11 @@ export default function Layout() {
                 </div>
             </aside>
 
-            {/* Semicircular toggle button attached to the panel edge to collapse/expand (desktop only) */}
             <button
                 onClick={() => setIsSidebarOpen(prev => !prev)}
                 aria-label={isSidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-                className={`hidden md:flex absolute top-1/2 -translate-y-1/2 z-30 h-9 w-4 rounded-r-full bg-pharmacy-green border border-l-0 border-pharmacy-green-light items-center justify-center text-pharmacy-cream/70 shadow-lg hover:bg-pharmacy-green-light hover:text-white transition-all duration-300 ${
-                    isSidebarOpen ? 'left-64' : 'left-0'
-                }`}
+                className={`hidden md:flex absolute top-1/2 -translate-y-1/2 z-30 h-9 w-4 rounded-r-full bg-pharmacy-green border border-l-0 border-pharmacy-green-light items-center justify-center text-pharmacy-cream/70 shadow-lg hover:bg-pharmacy-green-light hover:text-white transition-all duration-300 ${isSidebarOpen ? 'left-64' : 'left-0'
+                    }`}
             >
                 <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path
@@ -435,7 +439,6 @@ export default function Layout() {
                 </svg>
             </button>
 
-            {/* Mobile top bar + dynamic container injected by React Router (Outlet) */}
             <div className="flex-1 flex flex-col overflow-hidden">
                 <div className="md:hidden flex items-center gap-3 bg-pharmacy-green text-white px-4 py-3 shrink-0 shadow-md">
                     <button
