@@ -14,6 +14,7 @@ DROP POLICY IF EXISTS "Enable delete for pharmacists only" ON rooms;
 DROP POLICY IF EXISTS "Enable read access for authenticated users" ON professionals;
 DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON professionals;
 DROP POLICY IF EXISTS "Enable update for pharmacists only" ON professionals;
+DROP POLICY IF EXISTS "Enable delete for pharmacists only" ON professionals;
 DROP POLICY IF EXISTS "Enable read access for authenticated users" ON availabilities;
 DROP POLICY IF EXISTS "Enable insert for authenticated users only" ON availabilities;
 DROP POLICY IF EXISTS "Enable delete for authenticated users only" ON availabilities;
@@ -33,6 +34,7 @@ CREATE POLICY "Enable delete for pharmacists only" ON rooms FOR DELETE TO authen
 CREATE POLICY "Enable read access for authenticated users" ON professionals FOR SELECT TO authenticated USING (auth.role() = 'authenticated');
 CREATE POLICY "Enable insert for authenticated users only" ON professionals FOR INSERT TO authenticated WITH CHECK (auth.role() = 'authenticated');
 CREATE POLICY "Enable update for pharmacists only" ON professionals FOR UPDATE TO authenticated USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'pharmacist') WITH CHECK ((auth.jwt() -> 'app_metadata' ->> 'role') = 'pharmacist');
+CREATE POLICY "Enable delete for pharmacists only" ON professionals FOR DELETE TO authenticated USING ((auth.jwt() -> 'app_metadata' ->> 'role') = 'pharmacist');
 
 -- 5. Availabilities Policies
 CREATE POLICY "Enable read access for authenticated users" ON availabilities FOR SELECT TO authenticated USING (auth.role() = 'authenticated');

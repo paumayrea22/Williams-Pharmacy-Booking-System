@@ -45,6 +45,7 @@ export default function StaffManagement() {
     const [newName, setNewName] = useState('');
     const [newSpecialty, setNewSpecialty] = useState('');
     const [newDuration, setNewDuration] = useState('15');
+    const [customDurationMinutes, setCustomDurationMinutes] = useState('');
 
     const [newRoomLabel, setNewRoomLabel] = useState('');
     
@@ -58,6 +59,7 @@ export default function StaffManagement() {
     const [errorMessage, setErrorMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [updatingDurationId, setUpdatingDurationId] = useState<number | null>(null);
+    const [deletingProfessionalId, setDeletingProfessionalId] = useState<number | null>(null);
 
     const fetchProfessionals = async () => {
         try {
@@ -152,6 +154,12 @@ export default function StaffManagement() {
             return;
         }
 
+        const finalDuration = newDuration === 'custom' ? parseInt(customDurationMinutes) : parseInt(newDuration);
+        if (!finalDuration || finalDuration <= 0) {
+            setErrorMessage('Validation Error: Custom consultation duration must be a positive number of minutes.');
+            return;
+        }
+
         setIsLoading(true);
         try {
             const { error } = await supabase
@@ -159,7 +167,7 @@ export default function StaffManagement() {
                 .insert({
                     full_name: newName.trim(),
                     specialty: newSpecialty.trim(),
-                    default_duration_minutes: parseInt(newDuration)
+                    default_duration_minutes: finalDuration
                 });
 
             if (error) {
@@ -169,6 +177,7 @@ export default function StaffManagement() {
             setNewName('');
             setNewSpecialty('');
             setNewDuration('15');
+            setCustomDurationMinutes('');
             await fetchProfessionals();
         } catch (error) {
             setErrorMessage('Error inserting professional: ' + getErrorMessage(error));
@@ -201,9 +210,48 @@ export default function StaffManagement() {
             await fetchProfessionals();
         } catch (error) {
             setErrorMessage('Error updating consultation duration: ' + getErrorMessage(error));
-            await fetchProfessionals(); 
+            await fetchProfessionals();
         } finally {
             setUpdatingDurationId(null);
+        }
+    };
+
+    // Removes a specialist. Appointments reference professionals with ON DELETE RESTRICT,
+    // so Postgres rejects this (code 23503) if the doctor has any appointment on record.
+    const deleteProfessional = async (professionalId: number, fullName: string) => {
+        const confirmation = window.confirm(`Are you strictly sure you want to permanently delete ${fullName}? This cannot be undone.`);
+        if (!confirmation) return;
+
+        setErrorMessage('');
+        setDeletingProfessionalId(professionalId);
+        try {
+            // .select() forces Postgres to report which rows were actually touched, so a Row Level
+            // Security denial (0 rows matched, no thrown error) can be detected instead of silently ignored
+            const { data, error } = await supabase
+                .from('professionals')
+                .delete()
+                .eq('id', professionalId)
+                .select('id');
+
+            if (error) {
+                if (error.code === '23503') {
+                    throw new Error(`Cannot delete ${fullName}: this doctor still has appointments on record. Cancel or reassign them first.`);
+                }
+                throw new Error(error.message);
+            }
+
+            if (!data || data.length === 0) {
+                throw new Error('Delete blocked by database permissions: run supabase/03_security_and_policies.sql and confirm you are signed in as a pharmacist.');
+            }
+
+            if (selectedProfessional === professionalId.toString()) {
+                setSelectedProfessional('');
+            }
+            await fetchProfessionals();
+        } catch (error) {
+            setErrorMessage('Error deleting professional: ' + getErrorMessage(error));
+        } finally {
+            setDeletingProfessionalId(null);
         }
     };
 
@@ -419,7 +467,7 @@ export default function StaffManagement() {
                             </button>
                         </form>
 
-                        <div className="overflow-y-auto max-h-48 border border-pharmacy-ink/10 rounded-lg custom-scrollbar">
+                        <div className="overflow-y-auto h-full min-h-0 border border-pharmacy-ink/10 rounded-lg custom-scrollbar">
                             <ul className="divide-y divide-pharmacy-cream-dark">
                                 {whitelist.length === 0 ? (
                                     <li className="p-4 text-xs text-center text-pharmacy-muted italic">No authorized users found.</li>
@@ -479,7 +527,24 @@ export default function StaffManagement() {
                                 <option value="15">15 minutes (General Medicine / Fast)</option>
                                 <option value="30">30 minutes (Pediatrics / Dermatology)</option>
                                 <option value="60">60 minutes (Psychology / Audits)</option>
+                                <option value="custom">Custom...</option>
                             </select>
+
+                            {newDuration === 'custom' && (
+                                <div className="mt-2 flex items-center gap-2 rounded-lg border border-pharmacy-gold/40 bg-pharmacy-gold/10 p-2 animate-fadeIn">
+                                    <input
+                                        type="number"
+                                        min="1"
+                                        step="1"
+                                        value={customDurationMinutes}
+                                        onChange={(e) => setCustomDurationMinutes(e.target.value)}
+                                        placeholder="E.g. 45"
+                                        autoFocus
+                                        className="w-full border border-pharmacy-ink/20 rounded-lg p-2 text-sm shadow-sm bg-white focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold"
+                                    />
+                                    <span className="text-sm font-semibold text-pharmacy-muted shrink-0">minutes</span>
+                                </div>
+                            )}
                         </div>
                         <button
                             type="submit"
@@ -502,17 +567,31 @@ export default function StaffManagement() {
                                             <span className="font-bold text-pharmacy-ink block truncate">{p.full_name}</span>
                                             <span className="text-pharmacy-muted">{p.specialty}</span>
                                         </div>
-                                        <select
-                                            value={p.default_duration_minutes}
-                                            onChange={(e) => updateProfessionalDuration(p.id, parseInt(e.target.value))}
-                                            disabled={updatingDurationId === p.id}
-                                            aria-label={`Consultation duration for ${p.full_name}`}
-                                            className="shrink-0 border border-pharmacy-ink/20 rounded p-1 text-xs bg-white focus:outline-none disabled:opacity-50"
-                                        >
-                                            <option value="15">15 min</option>
-                                            <option value="30">30 min</option>
-                                            <option value="60">60 min</option>
-                                        </select>
+                                        <div className="flex items-center gap-2 shrink-0">
+                                            <select
+                                                value={p.default_duration_minutes}
+                                                onChange={(e) => updateProfessionalDuration(p.id, parseInt(e.target.value))}
+                                                disabled={updatingDurationId === p.id}
+                                                aria-label={`Consultation duration for ${p.full_name}`}
+                                                className="shrink-0 border border-pharmacy-ink/20 rounded p-1 text-xs bg-white focus:outline-none disabled:opacity-50"
+                                            >
+                                                {![15, 30, 60].includes(p.default_duration_minutes) && (
+                                                    <option value={p.default_duration_minutes}>{p.default_duration_minutes} min</option>
+                                                )}
+                                                <option value="15">15 min</option>
+                                                <option value="30">30 min</option>
+                                                <option value="60">60 min</option>
+                                            </select>
+                                            <button
+                                                onClick={() => deleteProfessional(p.id, p.full_name)}
+                                                disabled={deletingProfessionalId === p.id}
+                                                aria-label={`Delete ${p.full_name}`}
+                                                title="Delete specialist"
+                                                className="shrink-0 text-red-700/80 font-bold hover:text-red-700 transition disabled:opacity-50"
+                                            >
+                                                {deletingProfessionalId === p.id ? '...' : 'Delete'}
+                                            </button>
+                                        </div>
                                     </li>
                                 ))}
                             </ul>
@@ -565,7 +644,7 @@ export default function StaffManagement() {
                         </div>
                     </form>
 
-                    <div className="flex-1 overflow-y-auto max-h-60 border border-pharmacy-ink/10 rounded-lg custom-scrollbar">
+                    <div className="flex-1 min-h-0 overflow-y-auto border border-pharmacy-ink/10 rounded-lg custom-scrollbar">
                         {availabilities.length === 0 ? (
                             <p className="text-xs text-pharmacy-muted p-4 text-center">No working hours assigned for this specialist.</p>
                         ) : (
