@@ -897,8 +897,9 @@ export default function Calendar() {
                 )}
             </div>
 
-            <AppointmentModal 
-                isOpen={isModalOpen}
+            {isModalOpen && (
+            <AppointmentModal
+                key={appointmentToEdit ? `edit-${appointmentToEdit.id}` : (prefilledDate ? `deep-${prefilledDate.toISO()}-${prefilledTime.join(',')}` : 'new')}
                 onClose={handleCloseModal}
                 onSuccess={() => setRefreshKey(prev => prev + 1)}
                 selectedProfessionalId={selectedProfessional}
@@ -908,6 +909,7 @@ export default function Calendar() {
                 initialTime={prefilledTime}
                 initialRoom={prefilledRoom}
             />
+            )}
         </div>
     );
 }

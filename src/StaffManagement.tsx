@@ -467,7 +467,7 @@ export default function StaffManagement() {
                             </button>
                         </form>
 
-                        <div className="overflow-y-auto h-full min-h-0 border border-pharmacy-ink/10 rounded-lg custom-scrollbar">
+                        <div className="overflow-y-auto max-h-56 self-start border border-pharmacy-ink/10 rounded-lg custom-scrollbar">
                             <ul className="divide-y divide-pharmacy-cream-dark">
                                 {whitelist.length === 0 ? (
                                     <li className="p-4 text-xs text-center text-pharmacy-muted italic">No authorized users found.</li>

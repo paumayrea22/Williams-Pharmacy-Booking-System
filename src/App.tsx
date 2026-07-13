@@ -9,6 +9,7 @@ import { PharmacistOnlyRoute } from './components/PharmacistOnlyRoute';
 // Secondary modules are code-split so a fresh login only downloads the Calendar bundle up front
 const StaffManagement = lazy(() => import('./StaffManagement'));
 const DoctorLeaveManagement = lazy(() => import('./DoctorLeaveManagement'));
+const AppointmentHistory = lazy(() => import('./AppointmentHistory'));
 const StressTest = lazy(() => import('./StressTest'));
 
 const ModuleLoadingFallback = () => (
@@ -33,6 +34,7 @@ export default function App() {
                             <Route path="/staff" element={<Suspense fallback={<ModuleLoadingFallback />}><StaffManagement /></Suspense>} />
                         </Route>
                         <Route path="/leaves" element={<Suspense fallback={<ModuleLoadingFallback />}><DoctorLeaveManagement /></Suspense>} />
+                        <Route path="/history" element={<Suspense fallback={<ModuleLoadingFallback />}><AppointmentHistory /></Suspense>} />
                         <Route path="/stress-test" element={<Suspense fallback={<ModuleLoadingFallback />}><StressTest /></Suspense>} />
                     </Route>
                 </Route>
