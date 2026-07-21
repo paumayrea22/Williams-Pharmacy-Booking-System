@@ -180,8 +180,8 @@ export default function Layout() {
 
     const closeMobileDrawer = () => setIsMobileDrawerOpen(false);
 
-    // Dynamically generate the WebCal subscription URL using the current host to prevent hardcoding issues
-    const hostname = window.location.host;
+    // Dynamically generate the WebCal subscription URL stripping any residual protocols or extra slashes
+    const hostname = window.location.host.replace(/^(https?:\/\/)?(www\.)?/, '').replace(/\/+$/, '');
     const generatedWebcalUrl = syncToken ? `webcal://${hostname}/api/calendar?token=${syncToken}` : '';
 
     return (
