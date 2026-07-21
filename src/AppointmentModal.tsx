@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from './lib/supabase';
 import { DateTime } from 'luxon';
 import { getMaltaHolidayName } from './holidays';
@@ -39,7 +39,6 @@ interface Room {
 }
 
 interface AppointmentModalProps {
-    isOpen: boolean;
     onClose: () => void;
     onSuccess: () => void;
     selectedProfessionalId: string;
@@ -58,8 +57,29 @@ const extractNameAndNote = (fullName: string) => {
     };
 };
 
-export default function AppointmentModal({ 
-    isOpen, onClose, onSuccess, selectedProfessionalId, professionals, appointmentToEdit, initialDate, initialTime, initialRoom 
+// Reconstructs the list of selected HH:mm slots an existing appointment spans, using the
+// professional's consultation duration to know how many contiguous slots it occupies.
+const computeInitialTimes = (appointmentToEdit: Appointment | undefined | null, initialTime: string[] | undefined, professionals: Professional[]): string[] => {
+    if (appointmentToEdit) {
+        const oldStart = DateTime.fromISO(appointmentToEdit.start_time_utc, { zone: 'Europe/Malta' });
+        const oldEnd = DateTime.fromISO(appointmentToEdit.end_time_utc, { zone: 'Europe/Malta' });
+        const diffMinutes = oldEnd.diff(oldStart, 'minutes').minutes;
+        const currentProfessional = professionals.find(p => p.id === appointmentToEdit.professional_id);
+        const duration = currentProfessional ? currentProfessional.default_duration_minutes : 15;
+
+        const slotsCount = Math.max(1, Math.round(diffMinutes / duration));
+        const times: string[] = [];
+        for (let i = 0; i < slotsCount; i++) {
+            times.push(oldStart.plus({ minutes: i * duration }).toFormat('HH:mm'));
+        }
+        return times;
+    }
+    if (initialTime && initialTime.length > 0) return initialTime;
+    return [];
+};
+
+export default function AppointmentModal({
+    onClose, onSuccess, selectedProfessionalId, professionals, appointmentToEdit, initialDate, initialTime, initialRoom
 }: AppointmentModalProps) {
     const { role, username } = useAuth();
     const staffUsername = username ?? 'System';
@@ -67,120 +87,65 @@ export default function AppointmentModal({
     // Identifies if the modal was opened by clicking a specific cell on the grid
     const isGridDeepLink = !!(initialDate && initialTime && initialTime.length > 0 && !appointmentToEdit);
 
-    const [modalProfessionalId, setModalProfessionalId] = useState(selectedProfessionalId);
-    const [clientName, setClientName] = useState('');
-    const [clientPhone, setClientPhone] = useState('');
-    const [appointmentNote, setAppointmentNote] = useState('');
-    const [countryIso2, setCountryIso2] = useState(DEFAULT_COUNTRY_ISO2);
-    const [roomNumber, setRoomNumber] = useState('');
+    // Doctors are always locked to their own professional record, regardless of what opened the modal
+    const computeInitialProfessionalId = (): string => {
+        if (role === 'doctor' && username) {
+            const doctorName = username.split('-')[1];
+            const matchingProf = professionals.find(p => p.full_name.includes(doctorName));
+            if (matchingProf) return matchingProf.id.toString();
+        }
+        if (appointmentToEdit) return appointmentToEdit.professional_id.toString();
+        if (selectedProfessionalId === 'ALL' || selectedProfessionalId === 'MONTH_SUMMARY') {
+            return professionals[0]?.id.toString() || '';
+        }
+        return selectedProfessionalId;
+    };
+
+    const [modalProfessionalId, setModalProfessionalId] = useState(computeInitialProfessionalId);
+    const [clientName, setClientName] = useState(() => appointmentToEdit ? extractNameAndNote(appointmentToEdit.client_name).name : '');
+    const [appointmentNote, setAppointmentNote] = useState(() => appointmentToEdit ? extractNameAndNote(appointmentToEdit.client_name).note : '');
+    const [countryIso2, setCountryIso2] = useState(() => appointmentToEdit ? splitStoredPhone(appointmentToEdit.client_phone).iso2 : DEFAULT_COUNTRY_ISO2);
+    const [clientPhone, setClientPhone] = useState(() => appointmentToEdit ? splitStoredPhone(appointmentToEdit.client_phone).localNumber : '');
+    const [roomNumber, setRoomNumber] = useState(() => {
+        if (appointmentToEdit) return appointmentToEdit.room_number.toString();
+        return initialRoom || '';
+    });
     const [rooms, setRooms] = useState<Room[]>([]);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
 
     const [activePanel, setActivePanel] = useState<'NONE' | 'DATE' | 'TIME'>('NONE');
-    const [confirmedDate, setConfirmedDate] = useState<DateTime | null>(null);
-    const [confirmedTime, setConfirmedTime] = useState<string[]>([]);
-    const [tempDate, setTempDate] = useState<DateTime | null>(null);
-    const [tempTime, setTempTime] = useState<string[]>([]);
+    const [confirmedDate, setConfirmedDate] = useState<DateTime | null>(() => {
+        if (appointmentToEdit) return DateTime.fromISO(appointmentToEdit.start_time_utc, { zone: 'Europe/Malta' });
+        return initialDate ?? null;
+    });
+    const [confirmedTime, setConfirmedTime] = useState<string[]>(() => computeInitialTimes(appointmentToEdit, initialTime, professionals));
+    const [tempDate, setTempDate] = useState<DateTime | null>(() => initialDate ?? null);
+    const [tempTime, setTempTime] = useState<string[]>(() => computeInitialTimes(appointmentToEdit, initialTime, professionals));
 
     const [monthAvailabilities, setMonthAvailabilities] = useState<Availability[]>([]);
     const [monthAppointments, setMonthAppointments] = useState<Appointment[]>([]);
-    const [availableSlots, setAvailableSlots] = useState<{ time: string; isBooked: boolean }[]>([]);
     const [gridEligibleDoctors, setGridEligibleDoctors] = useState<number[] | null>(null);
-    
-    const [currentMonth, setCurrentMonth] = useState<DateTime>(DateTime.local({ zone: 'Europe/Malta' }));
 
-    // Core Initialization
-    useEffect(() => {
-        if (!isOpen) return;
+    const [currentMonth, setCurrentMonth] = useState<DateTime>(() => {
+        if (appointmentToEdit) return DateTime.fromISO(appointmentToEdit.start_time_utc, { zone: 'Europe/Malta' });
+        return initialDate ?? DateTime.local({ zone: 'Europe/Malta' });
+    });
 
-        setActivePanel('NONE');
-        setErrorMessage('');
-        setCurrentMonth(DateTime.local({ zone: 'Europe/Malta' }));
-
-        if (appointmentToEdit) {
-            setModalProfessionalId(appointmentToEdit.professional_id.toString());
-            setRoomNumber(appointmentToEdit.room_number.toString());
-
-            const parsedData = extractNameAndNote(appointmentToEdit.client_name);
-            setClientName(parsedData.name);
-            setAppointmentNote(parsedData.note);
-
-            const { iso2, localNumber } = splitStoredPhone(appointmentToEdit.client_phone);
-            setCountryIso2(iso2);
-            setClientPhone(localNumber);
-
-            const oldStart = DateTime.fromISO(appointmentToEdit.start_time_utc, { zone: 'Europe/Malta' });
-            const oldEnd = DateTime.fromISO(appointmentToEdit.end_time_utc, { zone: 'Europe/Malta' });
-            
-            setConfirmedDate(oldStart);
-            setCurrentMonth(oldStart);
-
-            const diffMinutes = oldEnd.diff(oldStart, 'minutes').minutes;
-            const currentProfessional = professionals.find(p => p.id === appointmentToEdit.professional_id);
-            const duration = currentProfessional ? currentProfessional.default_duration_minutes : 15;
-            
-            const slotsCount = Math.max(1, Math.round(diffMinutes / duration));
-            const times = [];
-            for (let i = 0; i < slotsCount; i++) {
-                times.push(oldStart.plus({ minutes: i * duration }).toFormat('HH:mm'));
-            }
-            setConfirmedTime(times);
-            setTempTime(times);
-
-        } else if (isGridDeepLink) {
-            setModalProfessionalId((selectedProfessionalId === 'ALL' || selectedProfessionalId === 'MONTH_SUMMARY') ? (professionals[0]?.id.toString() || '') : selectedProfessionalId);
-            setConfirmedDate(initialDate!);
-            setConfirmedTime(initialTime!);
-            setTempDate(initialDate!);
-            setTempTime(initialTime!);
-            setCurrentMonth(initialDate!);
-            setClientName('');
-            setClientPhone('');
-            setAppointmentNote('');
-            setCountryIso2(DEFAULT_COUNTRY_ISO2);
-            setRoomNumber(initialRoom || '');
-            setActivePanel('NONE');
-        } else {
-            setModalProfessionalId((selectedProfessionalId === 'ALL' || selectedProfessionalId === 'MONTH_SUMMARY') ? (professionals[0]?.id.toString() || '') : selectedProfessionalId);
-            setConfirmedDate(null);
-            setConfirmedTime([]);
-            setClientName('');
-            setClientPhone('');
-            setAppointmentNote('');
-            setCountryIso2(DEFAULT_COUNTRY_ISO2);
-            setRoomNumber('');
-            setTempTime([]);
-        }
-
-        if (role === 'doctor' && username) {
-            const doctorName = username.split('-')[1];
-            const matchingProf = professionals.find(p => p.full_name.includes(doctorName));
-            if (matchingProf) setModalProfessionalId(matchingProf.id.toString());
-        }
-    }, [isOpen, selectedProfessionalId, professionals, appointmentToEdit, role, username, initialDate, initialTime, initialRoom, isGridDeepLink]);
+    // Fallback to the first registered room until the pharmacist (or an edit/deep-link) picks one explicitly
+    const effectiveRoomNumber = roomNumber || rooms[0]?.room_number.toString() || '';
 
     useEffect(() => {
-        if (!isOpen) return;
-
         const fetchRooms = async () => {
             const { data, error } = await supabase.from('rooms').select('id, room_number, label').order('room_number', { ascending: true });
             if (!error && data) setRooms(data);
         };
         fetchRooms();
-    }, [isOpen]);
-
-    useEffect(() => {
-        if (!isOpen || appointmentToEdit || roomNumber || rooms.length === 0) return;
-        setRoomNumber(rooms[0].room_number.toString());
-    }, [isOpen, appointmentToEdit, roomNumber, rooms]);
+    }, []);
 
     // Fast-tracks eligible doctors logic when opening from the grid to disable doctors that don't fit the slot
     useEffect(() => {
-        if (!isOpen || !isGridDeepLink || !initialDate || !initialTime) {
-            setGridEligibleDoctors(null);
-            return;
-        }
+        if (!isGridDeepLink || !initialDate || !initialTime) return;
 
         const fetchEligibility = async () => {
             const sqlDay = initialDate.weekday === 7 ? 0 : initialDate.weekday;
@@ -239,7 +204,7 @@ export default function AppointmentModal({
         };
 
         fetchEligibility();
-    }, [isOpen, isGridDeepLink, initialDate, initialTime, professionals]);
+    }, [isGridDeepLink, initialDate, initialTime, professionals]);
 
     const isHolidayBlocked = (dateObj: DateTime): boolean => {
         if (dateObj.weekday === 7) return true; 
@@ -256,7 +221,7 @@ export default function AppointmentModal({
     };
 
     useEffect(() => {
-        if (!isOpen || !modalProfessionalId) return;
+        if (!modalProfessionalId) return;
 
         const fetchMonthData = async () => {
             const startOfMonth = currentMonth.startOf('month').toUTC().toISO();
@@ -274,14 +239,15 @@ export default function AppointmentModal({
             setMonthAppointments(apptRes.data || []);
         };
         fetchMonthData();
-    }, [modalProfessionalId, currentMonth, isOpen]);
+    }, [modalProfessionalId, currentMonth]);
 
-    useEffect(() => {
-        if (!confirmedDate || !modalProfessionalId) return;
-        
+    // Pure derivation from already-fetched state: no need for an effect + extra state round-trip
+    const availableSlots = useMemo(() => {
+        if (!confirmedDate || !modalProfessionalId) return [];
+
         const sqlDayOfWeek = confirmedDate.weekday === 7 ? 0 : confirmedDate.weekday;
-        const selectedDateString = confirmedDate.toISODate(); 
-        
+        const selectedDateString = confirmedDate.toISODate();
+
         const dayAvails = monthAvailabilities.filter(a => a.day_of_week === sqlDayOfWeek);
         const currentProfessional = professionals.find(p => p.id.toString() === modalProfessionalId);
         const duration = currentProfessional ? currentProfessional.default_duration_minutes : 15;
@@ -297,7 +263,7 @@ export default function AppointmentModal({
                 const isBooked = monthAppointments.some(appt => {
                     const apptStart = DateTime.fromISO(appt.start_time_utc, { zone: 'Europe/Malta' });
                     const apptEnd = DateTime.fromISO(appt.end_time_utc, { zone: 'Europe/Malta' });
-                    
+
                     if (appointmentToEdit && appt.id === appointmentToEdit.id) return false;
                     return appt.status !== 'cancelled' && currentSlot >= apptStart && currentSlot < apptEnd;
                 });
@@ -308,10 +274,8 @@ export default function AppointmentModal({
         });
 
         generatedSlots.sort((a, b) => a.time.localeCompare(b.time));
-        setAvailableSlots(generatedSlots);
+        return generatedSlots;
     }, [confirmedDate, monthAvailabilities, monthAppointments, modalProfessionalId, professionals, appointmentToEdit]);
-
-    if (!isOpen) return null;
 
     const handlePhoneInput = (e: React.ChangeEvent<HTMLInputElement>) => {
         const onlyNumbers = e.target.value.replace(/\D/g, '');
@@ -379,7 +343,7 @@ export default function AppointmentModal({
         setErrorMessage('');
         setIsSubmitting(true);
 
-        if (!clientName.trim() || clientPhone.length < 8 || !confirmedDate || confirmedTime.length === 0 || !roomNumber) {
+        if (!clientName.trim() || clientPhone.length < 8 || !confirmedDate || confirmedTime.length === 0 || !effectiveRoomNumber) {
             setErrorMessage('All fields are required. Phone must be at least 8 digits.');
             setIsSubmitting(false);
             return;
@@ -420,7 +384,7 @@ export default function AppointmentModal({
 
             const { error: rpcError } = await supabase.rpc('book_appointment_secure', {
                 p_professional_id: parseInt(modalProfessionalId),
-                p_room_number: parseInt(roomNumber),
+                p_room_number: parseInt(effectiveRoomNumber),
                 p_client_name: finalClientName,
                 p_client_phone: `${selectedDialCode} ${clientPhone}`,
                 p_start_time_utc: startDateTime.toUTC().toISO(),
@@ -711,7 +675,7 @@ export default function AppointmentModal({
                                                 type="radio"
                                                 name="room"
                                                 value={room.room_number}
-                                                checked={roomNumber === room.room_number.toString()}
+                                                checked={effectiveRoomNumber === room.room_number.toString()}
                                                 onChange={(e) => setRoomNumber(e.target.value)}
                                                 className="w-4 h-4 text-pharmacy-gold-dark border-pharmacy-ink/30 focus:ring-pharmacy-gold"
                                             />
@@ -726,9 +690,9 @@ export default function AppointmentModal({
                             <button type="button" onClick={onClose} disabled={isSubmitting} className="text-sm font-semibold text-pharmacy-muted hover:text-pharmacy-ink transition">
                                 Cancel & Close
                             </button>
-                            <button 
-                                type="submit" 
-                                disabled={isSubmitting || !clientName || clientPhone.length < 8 || !confirmedDate || confirmedTime.length === 0 || !roomNumber || (isGridDeepLink && gridEligibleDoctors?.length === 0)} 
+                            <button
+                                type="submit"
+                                disabled={isSubmitting || !clientName || clientPhone.length < 8 || !confirmedDate || confirmedTime.length === 0 || !effectiveRoomNumber || (isGridDeepLink && gridEligibleDoctors?.length === 0)}
                                 className="rounded-full bg-pharmacy-gold px-6 py-2.5 text-sm font-bold text-pharmacy-green shadow-md hover:bg-pharmacy-gold-dark hover:text-white disabled:bg-gray-300 disabled:text-white disabled:shadow-none transition-all"
                             >
                                 {isSubmitting ? 'Saving...' : (appointmentToEdit ? 'Confirm Reschedule' : 'Confirm Appointment')}

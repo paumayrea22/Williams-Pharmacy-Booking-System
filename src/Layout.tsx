@@ -382,6 +382,17 @@ export default function Layout() {
                             >
                                 Doctor Leaves
                             </Link>
+
+                            {/* Appointment history is available to both roles; doctors are scoped server-side to their own patients */}
+                            <Link
+                                to="/history"
+                                onClick={closeMobileDrawer}
+                                className={`px-4 py-3 rounded-lg text-sm font-semibold transition-colors ${
+                                    location.pathname === '/history' ? 'bg-pharmacy-green-light text-white shadow-inner' : 'text-pharmacy-cream/70 hover:bg-pharmacy-green-light/60 hover:text-white'
+                                }`}
+                            >
+                                Appointment History
+                            </Link>
                         </nav>
                     </div>
 

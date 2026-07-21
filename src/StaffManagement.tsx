@@ -468,8 +468,7 @@ export default function StaffManagement() {
                             </button>
                         </form>
 
-                        {/* Contenedor con altura máxima estricta (max-h-[232px]) para forzar el scrollbar interno */}
-                        <div className="overflow-y-auto max-h-[232px] w-full border border-pharmacy-ink/10 rounded-lg bg-white custom-scrollbar">
+                        <div className="overflow-y-auto max-h-56 w-full self-start border border-pharmacy-ink/10 rounded-lg bg-white custom-scrollbar">
                             <ul className="divide-y divide-pharmacy-cream-dark">
                                 {whitelist.length === 0 ? (
                                     <li className="p-4 text-xs text-center text-pharmacy-muted italic">No authorized users found.</li>
