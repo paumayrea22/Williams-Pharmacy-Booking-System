@@ -33,22 +33,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             .single();
 
         // 2. Halting execution if sync is disabled or token was revoked
-        // Returning HTTP 403 Forbidden forces Apple/Google to halt synchronization gracefully 
-        // without wiping the local historical appointments already saved on the doctor's phone.
+        // Returning HTTP 403 Forbidden forces Apple/Google to halt synchronization gracefully
         if (syncError || !syncData || !syncData.sync_enabled) {
             return res.status(403).send('Security Error: Calendar synchronization is currently disabled by the user or token revoked.');
         }
 
         const professionalId = syncData.professional_id;
 
+        // Capture the exact current timestamp in strict UTC format
+        const nowUtc = new Date().toISOString();
+
         // 3. Fetch valid appointments from the database
-        // We include appointments from the last 7 days to prevent sudden historical event drops on device refresh
+        // Filtering strictly by end_time_utc to exclude any finished appointments from the HTTP request
         const { data: appointments, error: apptError } = await supabase
             .from('appointments')
             .select('id, client_name, client_phone, start_time_utc, end_time_utc, internal_notes, room_number')
             .eq('professional_id', professionalId)
             .eq('status', 'confirmed')
-            .gte('start_time_utc', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+            .gte('end_time_utc', nowUtc)
             .order('start_time_utc', { ascending: true });
 
         if (apptError) {
@@ -68,7 +70,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ];
 
         if (appointments && appointments.length > 0) {
-            const now = formatIcsDate(new Date().toISOString());
+            // Generate the current DTSTAMP required by iCalendar standards
+            const now = formatIcsDate(nowUtc);
 
             for (const appt of appointments) {
                 const dtStart = formatIcsDate(appt.start_time_utc);
