@@ -5,6 +5,7 @@ import { getMaltaHolidayName } from './holidays';
 import { useAuth } from './context/AuthContext';
 import { getErrorMessage } from './lib/errors';
 import { COUNTRY_DIAL_CODES, DEFAULT_COUNTRY_ISO2, findCountryByIso2, getFlagEmoji, splitStoredPhone } from './lib/countryCodes';
+import { filterSelectableProfessionals } from './lib/professionals';
 
 interface Professional {
     id: number;
@@ -566,7 +567,7 @@ export default function AppointmentModal({
                                         }}
                                         className="w-full rounded-lg border border-pharmacy-ink/20 p-2 text-pharmacy-ink shadow-sm focus:border-pharmacy-gold focus:ring-2 focus:ring-pharmacy-gold/20"
                                     >
-                                        {professionals.map(prof => {
+                                        {filterSelectableProfessionals(professionals, username).map(prof => {
                                             const isEligible = isGridDeepLink && gridEligibleDoctors !== null ? gridEligibleDoctors.includes(prof.id) : true;
                                             return (
                                                 <option key={prof.id} value={prof.id} disabled={!isEligible}>

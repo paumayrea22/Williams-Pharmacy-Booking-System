@@ -4,6 +4,7 @@ import { DateTime } from 'luxon';
 import { useAuth } from './context/AuthContext';
 import { getErrorMessage } from './lib/errors';
 import { getMaltaHolidays, getMaltaHolidayName } from './holidays';
+import { filterSelectableProfessionals } from './lib/professionals';
 
 interface Professional {
     id: number;
@@ -328,7 +329,7 @@ export default function DoctorLeaveManagement() {
                                 onChange={(e) => setSelectedProfessional(e.target.value)}
                                 className="w-full border border-pharmacy-ink/20 rounded-lg p-2 text-sm shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold"
                             >
-                                {professionals.map(p => (
+                                {filterSelectableProfessionals(professionals, username).map(p => (
                                     <option key={p.id} value={p.id}>{p.full_name} ({p.specialty})</option>
                                 ))}
                             </select>

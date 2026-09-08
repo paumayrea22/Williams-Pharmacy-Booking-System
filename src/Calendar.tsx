@@ -6,6 +6,7 @@ import { useAuth } from './context/AuthContext';
 import { getMaltaHolidayName } from './holidays';
 import { getErrorMessage } from './lib/errors';
 import { formatDisplayPhone } from './lib/countryCodes';
+import { filterSelectableProfessionals } from './lib/professionals';
 
 interface WindowWithWebkitAudio extends Window {
     webkitAudioContext?: typeof AudioContext;
@@ -569,7 +570,7 @@ export default function Calendar() {
                         >
                             <option value="ALL">General (All Rooms & Doctors)</option>
                             <option value="MONTH_SUMMARY">Monthly Summary (All Appointments)</option>
-                            {isStaffLoading ? <option disabled>Loading staff...</option> : professionals.map((prof) => (
+                            {isStaffLoading ? <option disabled>Loading staff...</option> : filterSelectableProfessionals(professionals, username).map((prof) => (
                                 <option key={prof.id} value={prof.id}>{prof.full_name} ({prof.specialty})</option>
                             ))}
                         </select>
