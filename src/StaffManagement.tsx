@@ -36,26 +36,35 @@ export default function StaffManagement() {
     const { role, username } = useAuth();
     const staffUsername = username ?? 'System';
 
+    // Global Collections
     const [professionals, setProfessionals] = useState<Professional[]>([]);
-    const [selectedProfessional, setSelectedProfessional] = useState<string>('');
     const [availabilities, setAvailabilities] = useState<Availability[]>([]);
     const [rooms, setRooms] = useState<Room[]>([]);
     const [whitelist, setWhitelist] = useState<SystemAccess[]>([]);
 
+    // Create Professional State
     const [newName, setNewName] = useState('');
     const [newSpecialty, setNewSpecialty] = useState('');
     const [newDuration, setNewDuration] = useState('15');
     const [customDurationMinutes, setCustomDurationMinutes] = useState('');
 
-    const [newRoomLabel, setNewRoomLabel] = useState('');
-    
+    // Schedule Configuration State
+    const [selectedProfessional, setSelectedProfessional] = useState<string>('');
     const [newDay, setNewDay] = useState('1'); 
     const [startTime, setStartTime] = useState('08:00');
     const [endTime, setEndTime] = useState('14:00');
 
+    // Edit Professional State
+    const [editProfessionalId, setEditProfessionalId] = useState<string>('');
+    const [editProfessionalName, setEditProfessionalName] = useState<string>('');
+    const [editProfessionalSpecialty, setEditProfessionalSpecialty] = useState<string>('');
+
+    // System Components State
+    const [newRoomLabel, setNewRoomLabel] = useState('');
     const [newWhitelistUser, setNewWhitelistUser] = useState('');
     const [newWhitelistRole, setNewWhitelistRole] = useState('doctor');
 
+    // Execution State
     const [errorMessage, setErrorMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [updatingDurationId, setUpdatingDurationId] = useState<number | null>(null);
@@ -145,6 +154,32 @@ export default function StaffManagement() {
         fetchAvailabilities();
     }, [selectedProfessional]);
 
+    // Synchronize Edit State with Professionals Collection Lifecycle
+    useEffect(() => {
+        if (professionals.length > 0) {
+            const currentSelected = professionals.find(p => p.id.toString() === editProfessionalId);
+            if (!currentSelected) {
+                setEditProfessionalId(professionals[0].id.toString());
+                setEditProfessionalName(professionals[0].full_name);
+                setEditProfessionalSpecialty(professionals[0].specialty);
+            }
+        } else {
+            setEditProfessionalId('');
+            setEditProfessionalName('');
+            setEditProfessionalSpecialty('');
+        }
+    }, [professionals]);
+
+    const handleEditSelectionChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+        const id = e.target.value;
+        setEditProfessionalId(id);
+        const prof = professionals.find(p => p.id.toString() === id);
+        if (prof) {
+            setEditProfessionalName(prof.full_name);
+            setEditProfessionalSpecialty(prof.specialty);
+        }
+    };
+
     const createProfessional = async (e: React.FormEvent) => {
         e.preventDefault();
         setErrorMessage('');
@@ -181,6 +216,39 @@ export default function StaffManagement() {
             await fetchProfessionals();
         } catch (error) {
             setErrorMessage('Error inserting professional: ' + getErrorMessage(error));
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const updateProfessionalProfile = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setErrorMessage('');
+
+        if (!editProfessionalName.trim() || !editProfessionalSpecialty.trim()) {
+            setErrorMessage('Validation Error: The professional name and specialty cannot be strictly empty.');
+            return;
+        }
+
+        setIsLoading(true);
+        try {
+            // Updating the root entity automatically propagates changes 
+            // across all relational SQL JOINs (appointments, history, etc.)
+            const { error } = await supabase
+                .from('professionals')
+                .update({ 
+                    full_name: editProfessionalName.trim(),
+                    specialty: editProfessionalSpecialty.trim()
+                })
+                .eq('id', parseInt(editProfessionalId));
+
+            if (error) {
+                throw new Error(error.message);
+            }
+
+            await fetchProfessionals();
+        } catch (error) {
+            setErrorMessage('Error updating professional profile: ' + getErrorMessage(error));
         } finally {
             setIsLoading(false);
         }
@@ -225,8 +293,6 @@ export default function StaffManagement() {
         setErrorMessage('');
         setDeletingProfessionalId(professionalId);
         try {
-            // .select() forces Postgres to report which rows were actually touched, so a Row Level
-            // Security denial (0 rows matched, no thrown error) can be detected instead of silently ignored
             const { data, error } = await supabase
                 .from('professionals')
                 .delete()
@@ -435,7 +501,6 @@ export default function StaffManagement() {
                         </div>
                     </div>
                     
-                    {/* Contenedor Grid con items-start para evitar que las columnas se estiren juntas */}
                     <div className="grid gap-6 md:grid-cols-2 items-start">
                         <form onSubmit={authorizeSystemAccess} className="flex flex-col gap-4 bg-red-50/40 p-4 rounded-lg border border-red-100">
                             <div>
@@ -493,6 +558,7 @@ export default function StaffManagement() {
                 </div>
             )}
 
+            {/* Upper Grid: Registration & Schedules */}
             <div className="grid gap-6 md:grid-cols-2 shrink-0">
                 {/* Specialist Registration Panel */}
                 <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4">
@@ -673,55 +739,115 @@ export default function StaffManagement() {
                 </div>
             </div>
 
-            {/* Clinic Room Management Panel */}
-            <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4 shrink-0">
-                <div className="border-b pb-2 border-pharmacy-cream-dark">
-                    <h2 className="font-display text-lg text-pharmacy-ink">Clinic Rooms</h2>
-                    <p className="text-xs text-pharmacy-muted mt-0.5">
-                        Rooms registered here become selectable when booking or rescheduling an appointment.
-                    </p>
-                </div>
-
-                <form onSubmit={createRoom} className="flex items-end gap-2">
-                    <div className="flex-1">
-                        <label className="block text-xs font-bold text-pharmacy-muted mb-1">Room Name</label>
-                        <input
-                            type="text"
-                            value={newRoomLabel}
-                            onChange={(e) => setNewRoomLabel(e.target.value)}
-                            placeholder={`E.g. Room ${nextRoomNumber}`}
-                            className="w-full border border-pharmacy-ink/20 rounded-lg p-2 text-sm shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold"
-                        />
+            {/* Lower Grid: Profile Editing & Clinic Rooms */}
+            <div className="grid gap-6 md:grid-cols-2 shrink-0">
+                
+                {/* Doctor Profile Editing Panel */}
+                <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4">
+                    <div className="border-b pb-2 border-pharmacy-cream-dark">
+                        <h2 className="font-display text-lg text-pharmacy-ink">Edit Doctor Profile</h2>
+                        <p className="text-xs text-pharmacy-muted mt-0.5">
+                            Modify specialist identities. Changes automatically propagate to all historical and future appointments via strict relational constraints.
+                        </p>
                     </div>
-                    <button
-                        type="submit"
-                        disabled={isLoading}
-                        className="bg-pharmacy-green text-white rounded-lg px-4 py-2 text-sm font-bold hover:bg-pharmacy-green-light transition disabled:opacity-50 shrink-0"
-                    >
-                        Add Room
-                    </button>
-                </form>
 
-                <div className="max-h-48 overflow-y-auto border border-pharmacy-ink/10 rounded-lg custom-scrollbar">
-                    {rooms.length === 0 ? (
-                        <p className="text-xs text-pharmacy-muted p-4 text-center">No clinic rooms registered yet.</p>
-                    ) : (
-                        <ul className="divide-y divide-pharmacy-cream-dark">
-                            {rooms.map(room => (
-                                <li key={room.id} className="p-3 text-xs flex justify-between items-center hover:bg-pharmacy-cream">
-                                    <span className="font-bold text-pharmacy-ink">{room.label}</span>
-                                    <button
-                                        onClick={() => deleteRoom(room.id, room.label)}
-                                        disabled={isLoading}
-                                        className="text-red-700/80 font-bold hover:text-red-700 transition disabled:opacity-50"
-                                    >
-                                        Delete
-                                    </button>
-                                </li>
-                            ))}
-                        </ul>
-                    )}
+                    <form onSubmit={updateProfessionalProfile} className="flex flex-col gap-4">
+                        <div>
+                            <label className="block text-sm font-semibold text-pharmacy-ink mb-1">Target Professional</label>
+                            <select
+                                value={editProfessionalId}
+                                onChange={handleEditSelectionChange}
+                                className="w-full border border-pharmacy-ink/20 rounded-lg p-2 text-sm shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold"
+                            >
+                                {professionals.length === 0 && <option value="">No registered professionals</option>}
+                                {professionals.map(p => (
+                                    <option key={p.id} value={p.id}>{p.full_name} ({p.specialty})</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
+                            <label className="block text-sm font-semibold text-pharmacy-ink mb-1">Full Name</label>
+                            <input
+                                type="text"
+                                value={editProfessionalName}
+                                onChange={(e) => setEditProfessionalName(e.target.value)}
+                                placeholder="E.g. Dr. Martha Spiteri"
+                                disabled={!editProfessionalId}
+                                className="w-full border border-pharmacy-ink/20 rounded-lg p-2 text-sm shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold disabled:opacity-50 disabled:bg-pharmacy-cream/50"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-semibold text-pharmacy-ink mb-1">Medical Specialty</label>
+                            <input
+                                type="text"
+                                value={editProfessionalSpecialty}
+                                onChange={(e) => setEditProfessionalSpecialty(e.target.value)}
+                                placeholder="E.g. Clinical Psychology"
+                                disabled={!editProfessionalId}
+                                className="w-full border border-pharmacy-ink/20 rounded-lg p-2 text-sm shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold disabled:opacity-50 disabled:bg-pharmacy-cream/50"
+                            />
+                        </div>
+                        <button
+                            type="submit"
+                            disabled={isLoading || !editProfessionalId || !editProfessionalName.trim() || !editProfessionalSpecialty.trim()}
+                            className="w-full bg-pharmacy-ink text-white rounded-lg p-2.5 text-sm font-bold shadow-md hover:bg-pharmacy-ink/80 transition disabled:opacity-50"
+                        >
+                            {isLoading ? 'Executing update...' : 'Update Profile'}
+                        </button>
+                    </form>
                 </div>
+
+                {/* Clinic Room Management Panel */}
+                <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4">
+                    <div className="border-b pb-2 border-pharmacy-cream-dark">
+                        <h2 className="font-display text-lg text-pharmacy-ink">Clinic Rooms</h2>
+                        <p className="text-xs text-pharmacy-muted mt-0.5">
+                            Rooms registered here become selectable when booking or rescheduling an appointment.
+                        </p>
+                    </div>
+
+                    <form onSubmit={createRoom} className="flex items-end gap-2">
+                        <div className="flex-1">
+                            <label className="block text-xs font-bold text-pharmacy-muted mb-1">Room Name</label>
+                            <input
+                                type="text"
+                                value={newRoomLabel}
+                                onChange={(e) => setNewRoomLabel(e.target.value)}
+                                placeholder={`E.g. Room ${nextRoomNumber}`}
+                                className="w-full border border-pharmacy-ink/20 rounded-lg p-2 text-sm shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold"
+                            />
+                        </div>
+                        <button
+                            type="submit"
+                            disabled={isLoading}
+                            className="bg-pharmacy-green text-white rounded-lg px-4 py-2 text-sm font-bold hover:bg-pharmacy-green-light transition disabled:opacity-50 shrink-0"
+                        >
+                            Add Room
+                        </button>
+                    </form>
+
+                    <div className="max-h-48 overflow-y-auto border border-pharmacy-ink/10 rounded-lg custom-scrollbar">
+                        {rooms.length === 0 ? (
+                            <p className="text-xs text-pharmacy-muted p-4 text-center">No clinic rooms registered yet.</p>
+                        ) : (
+                            <ul className="divide-y divide-pharmacy-cream-dark">
+                                {rooms.map(room => (
+                                    <li key={room.id} className="p-3 text-xs flex justify-between items-center hover:bg-pharmacy-cream">
+                                        <span className="font-bold text-pharmacy-ink">{room.label}</span>
+                                        <button
+                                            onClick={() => deleteRoom(room.id, room.label)}
+                                            disabled={isLoading}
+                                            className="text-red-700/80 font-bold hover:text-red-700 transition disabled:opacity-50"
+                                        >
+                                            Delete
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
+                </div>
+                
             </div>
         </div>
     );
