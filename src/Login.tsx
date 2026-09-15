@@ -29,7 +29,8 @@ export default function Login() {
 
         checkRecoveryState();
 
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+        // Removed unused 'session' variable to prevent TypeScript strict mode build failures in Vercel
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
             if (event === 'PASSWORD_RECOVERY') {
                 setIsRecovering(true);
                 setSuccessMessage('Authentication successful. Please enter your new password.');
