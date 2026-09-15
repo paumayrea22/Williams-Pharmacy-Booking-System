@@ -19,21 +19,40 @@ export default function Login() {
     const navigate = useNavigate();
 
     useEffect(() => {
-        const checkRecoveryState = async () => {
+        // Aggressively extract tokens from the URL to force the auth session immediately
+        const forceRecoverySession = async () => {
             const hash = window.location.hash;
-            if (hash && hash.includes('type=recovery')) {
-                setIsRecovering(true);
-                setSuccessMessage('Authentication successful. Please enter your new password.');
+            
+            if (hash && hash.includes('type=recovery') && hash.includes('access_token=')) {
+                // Parse the URL fragment string safely
+                const hashParams = new URLSearchParams(hash.replace(/^#/, ''));
+                const accessToken = hashParams.get('access_token');
+                const refreshToken = hashParams.get('refresh_token');
+
+                if (accessToken && refreshToken) {
+                    // Manually inject the cryptographic tokens into the Supabase engine
+                    const { error } = await supabase.auth.setSession({
+                        access_token: accessToken,
+                        refresh_token: refreshToken
+                    });
+
+                    if (error) {
+                        setErrorMessage('Recovery link is invalid or has expired. Please request a new one.');
+                    } else {
+                        setIsRecovering(true);
+                        setSuccessMessage('Secure session established. Please enter your new password.');
+                    }
+                }
             }
         };
 
-        checkRecoveryState();
+        forceRecoverySession();
 
-        // Removed unused 'session' variable to prevent TypeScript strict mode build failures in Vercel
+        // Fallback listener for Supabase's native auth events
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
             if (event === 'PASSWORD_RECOVERY') {
                 setIsRecovering(true);
-                setSuccessMessage('Authentication successful. Please enter your new password.');
+                setSuccessMessage('Secure session established. Please enter your new password.');
             }
         });
 
@@ -55,16 +74,23 @@ export default function Login() {
                     throw new Error('Validation Error: Password must be at least 8 characters long.');
                 }
 
+                // Update the authenticated user's password in the database
                 const { error: updateError } = await supabase.auth.updateUser({ password: password });
-                if (updateError) throw updateError;
                 
-                setSuccessMessage('Password successfully updated! Redirecting to dashboard...');
+                if (updateError) {
+                    throw updateError;
+                }
                 
+                setSuccessMessage('Password successfully updated! Redirecting to internal system...');
+                
+                // Clean the URL hash entirely to prevent infinite recovery loops
                 window.history.replaceState(null, '', window.location.pathname);
                 
+                // Delay redirection to allow user to read the success message
                 setTimeout(() => {
                     navigate('/');
                 }, 2000);
+                
                 return;
             }
 
