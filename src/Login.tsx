@@ -19,12 +19,17 @@ export default function Login() {
     const navigate = useNavigate();
 
     useEffect(() => {
-        if (window.location.hash.includes('type=recovery')) {
-            setIsRecovering(true);
-            setSuccessMessage('Authentication successful. Please enter your new password.');
-        }
+        const checkRecoveryState = async () => {
+            const hash = window.location.hash;
+            if (hash && hash.includes('type=recovery')) {
+                setIsRecovering(true);
+                setSuccessMessage('Authentication successful. Please enter your new password.');
+            }
+        };
 
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+        checkRecoveryState();
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
             if (event === 'PASSWORD_RECOVERY') {
                 setIsRecovering(true);
                 setSuccessMessage('Authentication successful. Please enter your new password.');
@@ -115,7 +120,6 @@ export default function Login() {
         setIsProcessing(true);
         try {
             const { error } = await supabase.auth.resetPasswordForEmail(email, {
-                // Ensure routing bypasses ProtectedRoute to avoid stripping the auth hash
                 redirectTo: `${window.location.origin}/login`, 
             });
 
