@@ -3,15 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 
 export default function Login() {
-    // --- State Management ---
     const [isRegistering, setIsRegistering] = useState(false);
-    const [isRecovering, setIsRecovering] = useState(false); // New state to handle the reset flow UI
+    const [isRecovering, setIsRecovering] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [username, setUsername] = useState('');
     
-    // --- UI/UX States ---
     const [errorMessage, setErrorMessage] = useState('');
     const [successMessage, setSuccessMessage] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
@@ -20,15 +18,12 @@ export default function Login() {
     
     const navigate = useNavigate();
 
-    // Intercept Supabase Auth events to transform UI when clicking a recovery email link
     useEffect(() => {
-        // Fallback check directly on the URL hash for immediate UI feedback
         if (window.location.hash.includes('type=recovery')) {
             setIsRecovering(true);
             setSuccessMessage('Authentication successful. Please enter your new password.');
         }
 
-        // Official Supabase listener for authentication events
         const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
             if (event === 'PASSWORD_RECOVERY') {
                 setIsRecovering(true);
@@ -46,7 +41,6 @@ export default function Login() {
         setIsProcessing(true);
 
         try {
-            // 1. Password Reset Flow (Triggered after clicking the email link)
             if (isRecovering) {
                 if (password !== confirmPassword) {
                     throw new Error('Validation Error: Passwords do not match. Please try again.');
@@ -55,23 +49,19 @@ export default function Login() {
                     throw new Error('Validation Error: Password must be at least 8 characters long.');
                 }
 
-                // Update the authenticated user's password in the database
                 const { error: updateError } = await supabase.auth.updateUser({ password: password });
                 if (updateError) throw updateError;
                 
                 setSuccessMessage('Password successfully updated! Redirecting to dashboard...');
                 
-                // Clean the URL hash to prevent infinite recovery loops on manual refresh
                 window.history.replaceState(null, '', window.location.pathname);
                 
-                // Redirect user after a brief success delay
                 setTimeout(() => {
                     navigate('/');
                 }, 2000);
                 return;
             }
 
-            // 2. Registration Flow
             if (isRegistering) {
                 if (password !== confirmPassword) {
                     throw new Error('Validation Error: Passwords do not match. Please try again.');
@@ -95,7 +85,6 @@ export default function Login() {
                 return;
             } 
             
-            // 3. Standard Login Flow
             const { error: authError } = await supabase.auth.signInWithPassword({
                 email: email,
                 password: password
@@ -126,7 +115,8 @@ export default function Login() {
         setIsProcessing(true);
         try {
             const { error } = await supabase.auth.resetPasswordForEmail(email, {
-                redirectTo: window.location.origin, 
+                // Ensure routing bypasses ProtectedRoute to avoid stripping the auth hash
+                redirectTo: `${window.location.origin}/login`, 
             });
 
             if (error) throw error;
@@ -166,7 +156,6 @@ export default function Login() {
                 )}
 
                 <form onSubmit={handleFormSubmit} className="space-y-4">
-                    {/* Hide Email and Username fields if we are in Recovery mode */}
                     {!isRecovering && isRegistering && (
                         <div>
                             <label className="block text-sm font-medium text-pharmacy-ink">Username</label>
@@ -202,7 +191,6 @@ export default function Login() {
                             <label className="block text-sm font-medium text-pharmacy-ink">
                                 {isRecovering ? 'New Password' : 'Password'}
                             </label>
-                            {/* Forgot Password Link - Only visible in standard Login mode */}
                             {!isRegistering && !isRecovering && (
                                 <button
                                     type="button"
@@ -247,7 +235,6 @@ export default function Login() {
                         </div>
                     </div>
 
-                    {/* Confirm Password Field - Visible during registration OR recovery */}
                     {(isRegistering || isRecovering) && (
                         <div>
                             <label className="block text-sm font-medium text-pharmacy-ink">Confirm Password</label>
@@ -296,7 +283,6 @@ export default function Login() {
                     </button>
                 </form>
 
-                {/* Hide the mode toggle when recovering password to keep the user focused on the task */}
                 {!isRecovering && (
                     <div className="mt-6 text-center">
                         <button
