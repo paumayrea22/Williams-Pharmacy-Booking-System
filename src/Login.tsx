@@ -1,27 +1,44 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from './lib/supabase';
 
 export default function Login() {
     // --- State Management ---
     const [isRegistering, setIsRegistering] = useState(false);
+    const [isRecovering, setIsRecovering] = useState(false); // New state to handle the reset flow UI
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState(''); // Added for registration validation
+    const [confirmPassword, setConfirmPassword] = useState('');
     const [username, setUsername] = useState('');
     
     // --- UI/UX States ---
     const [errorMessage, setErrorMessage] = useState('');
-    const [successMessage, setSuccessMessage] = useState(''); // Added for reset password feedback
+    const [successMessage, setSuccessMessage] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     
     const navigate = useNavigate();
 
-    /**
-     * Handles the core authentication flow (Login and Registration)
-     */
+    // Intercept Supabase Auth events to transform UI when clicking a recovery email link
+    useEffect(() => {
+        // Fallback check directly on the URL hash for immediate UI feedback
+        if (window.location.hash.includes('type=recovery')) {
+            setIsRecovering(true);
+            setSuccessMessage('Authentication successful. Please enter your new password.');
+        }
+
+        // Official Supabase listener for authentication events
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+            if (event === 'PASSWORD_RECOVERY') {
+                setIsRecovering(true);
+                setSuccessMessage('Authentication successful. Please enter your new password.');
+            }
+        });
+
+        return () => subscription.unsubscribe();
+    }, []);
+
     const handleFormSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setErrorMessage('');
@@ -29,57 +46,74 @@ export default function Login() {
         setIsProcessing(true);
 
         try {
+            // 1. Password Reset Flow (Triggered after clicking the email link)
+            if (isRecovering) {
+                if (password !== confirmPassword) {
+                    throw new Error('Validation Error: Passwords do not match. Please try again.');
+                }
+                if (password.length < 8) {
+                    throw new Error('Validation Error: Password must be at least 8 characters long.');
+                }
+
+                // Update the authenticated user's password in the database
+                const { error: updateError } = await supabase.auth.updateUser({ password: password });
+                if (updateError) throw updateError;
+                
+                setSuccessMessage('Password successfully updated! Redirecting to dashboard...');
+                
+                // Clean the URL hash to prevent infinite recovery loops on manual refresh
+                window.history.replaceState(null, '', window.location.pathname);
+                
+                // Redirect user after a brief success delay
+                setTimeout(() => {
+                    navigate('/');
+                }, 2000);
+                return;
+            }
+
+            // 2. Registration Flow
             if (isRegistering) {
-                // 1. Strict password match validation
                 if (password !== confirmPassword) {
                     throw new Error('Validation Error: Passwords do not match. Please try again.');
                 }
 
-                // 2. Strict prefix validation using RegEx for Doctors and Pharmacists
                 const prefixRegex = /^(D-|P-).+$/;
                 if (!prefixRegex.test(username)) {
                     throw new Error('Validation Error: Username must strictly start with "D-" (Doctor) or "P-" (Pharmacy). Ex: P-Denisse');
                 }
 
-                // 3. Register in Supabase injecting the username. The SQL Trigger will assign the immutable role.
                 const { error: authError } = await supabase.auth.signUp({
                     email: email,
                     password: password,
                     options: {
-                        data: {
-                            username: username
-                        }
+                        data: { username: username }
                     }
                 });
 
                 if (authError) throw authError;
                 navigate('/');
-                
-            } else {
-                // Standard login flow
-                const { error: authError } = await supabase.auth.signInWithPassword({
-                    email: email,
-                    password: password
-                });
+                return;
+            } 
+            
+            // 3. Standard Login Flow
+            const { error: authError } = await supabase.auth.signInWithPassword({
+                email: email,
+                password: password
+            });
 
-                if (authError) {
-                    throw new Error('Invalid credentials. Please verify your email and password.');
-                }
-                navigate('/');
+            if (authError) {
+                throw new Error('Invalid credentials. Please verify your email and password.');
             }
+            navigate('/');
+            
         } catch (error: any) {
-            // Safely extract deeply nested Supabase Auth and Postgres Trigger errors
-            const extractedMessage = error?.message || error?.error_description || error?.msg || 'Unauthorized: You are not whitelisted in the system or an unexpected error occurred.';
+            const extractedMessage = error?.message || error?.error_description || error?.msg || 'An unexpected error occurred.';
             setErrorMessage(extractedMessage);
         } finally {
-            // Guaranteed UI unlock regardless of the result
             setIsProcessing(false);
         }
     };
 
-    /**
-     * Dispatches a secure password reset link to the user's email via Supabase Auth
-     */
     const handlePasswordReset = async () => {
         setErrorMessage('');
         setSuccessMessage('');
@@ -92,11 +126,10 @@ export default function Login() {
         setIsProcessing(true);
         try {
             const { error } = await supabase.auth.resetPasswordForEmail(email, {
-                redirectTo: window.location.origin, // Redirects back to the app after clicking the email link
+                redirectTo: window.location.origin, 
             });
 
             if (error) throw error;
-            
             setSuccessMessage('A secure password reset link has been sent to your email.');
         } catch (error: any) {
             setErrorMessage(error?.message || 'Failed to send password reset link. Please try again later.');
@@ -105,9 +138,6 @@ export default function Login() {
         }
     };
 
-    /**
-     * Resets form data when toggling between Login and Registration modes
-     */
     const toggleMode = () => {
         setIsRegistering(!isRegistering);
         setErrorMessage('');
@@ -120,17 +150,15 @@ export default function Login() {
         <div className="flex min-h-screen items-center justify-center bg-pharmacy-cream p-4">
             <div className="w-full max-w-md rounded-xl bg-white p-6 sm:p-8 shadow-lg border border-pharmacy-ink/10">
                 <h2 className="mb-6 text-center font-display text-2xl text-pharmacy-ink">
-                    {isRegistering ? 'Staff Registration' : 'Internal Access'}
+                    {isRecovering ? 'Update Password' : (isRegistering ? 'Staff Registration' : 'Internal Access')}
                 </h2>
 
-                {/* Error Banner */}
                 {errorMessage && (
                     <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-700 shadow-sm">
                         {errorMessage}
                     </div>
                 )}
 
-                {/* Success Banner */}
                 {successMessage && (
                     <div className="mb-4 rounded-lg border border-green-200 bg-green-50 p-3 text-sm font-medium text-green-700 shadow-sm">
                         {successMessage}
@@ -138,7 +166,8 @@ export default function Login() {
                 )}
 
                 <form onSubmit={handleFormSubmit} className="space-y-4">
-                    {isRegistering && (
+                    {/* Hide Email and Username fields if we are in Recovery mode */}
+                    {!isRecovering && isRegistering && (
                         <div>
                             <label className="block text-sm font-medium text-pharmacy-ink">Username</label>
                             <input
@@ -153,24 +182,28 @@ export default function Login() {
                         </div>
                     )}
 
-                    <div>
-                        <label className="block text-sm font-medium text-pharmacy-ink">Email Address</label>
-                        <input
-                            type="email"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            placeholder="email@pharmacy.com"
-                            className="mt-1 w-full rounded-md border border-pharmacy-ink/20 p-3 shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold"
-                            required
-                            disabled={isProcessing}
-                        />
-                    </div>
+                    {!isRecovering && (
+                        <div>
+                            <label className="block text-sm font-medium text-pharmacy-ink">Email Address</label>
+                            <input
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                placeholder="email@pharmacy.com"
+                                className="mt-1 w-full rounded-md border border-pharmacy-ink/20 p-3 shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold"
+                                required={!isRecovering}
+                                disabled={isProcessing}
+                            />
+                        </div>
+                    )}
 
                     <div>
                         <div className="flex justify-between items-center">
-                            <label className="block text-sm font-medium text-pharmacy-ink">Password</label>
-                            {/* Forgot Password Link - Only visible in Login mode */}
-                            {!isRegistering && (
+                            <label className="block text-sm font-medium text-pharmacy-ink">
+                                {isRecovering ? 'New Password' : 'Password'}
+                            </label>
+                            {/* Forgot Password Link - Only visible in standard Login mode */}
+                            {!isRegistering && !isRecovering && (
                                 <button
                                     type="button"
                                     onClick={handlePasswordReset}
@@ -214,8 +247,8 @@ export default function Login() {
                         </div>
                     </div>
 
-                    {/* Confirm Password Field - Only visible during registration */}
-                    {isRegistering && (
+                    {/* Confirm Password Field - Visible during registration OR recovery */}
+                    {(isRegistering || isRecovering) && (
                         <div>
                             <label className="block text-sm font-medium text-pharmacy-ink">Confirm Password</label>
                             <div className="relative mt-1">
@@ -226,7 +259,7 @@ export default function Login() {
                                     placeholder="Re-enter password"
                                     minLength={8}
                                     className="w-full rounded-md border border-pharmacy-ink/20 p-3 pr-11 shadow-sm focus:border-pharmacy-gold focus:outline-none focus:ring-1 focus:ring-pharmacy-gold"
-                                    required={isRegistering}
+                                    required={isRegistering || isRecovering}
                                     disabled={isProcessing}
                                 />
                                 <button
@@ -259,19 +292,23 @@ export default function Login() {
                             isProcessing ? 'bg-gray-300 text-white cursor-not-allowed' : 'bg-pharmacy-gold text-pharmacy-green hover:bg-pharmacy-gold-dark hover:text-white'
                         }`}
                     >
-                        {isProcessing ? 'Processing...' : (isRegistering ? 'Create Secure Account' : 'Enter System')}
+                        {isProcessing ? 'Processing...' : (isRecovering ? 'Save New Password' : (isRegistering ? 'Create Secure Account' : 'Enter System'))}
                     </button>
                 </form>
 
-                <div className="mt-6 text-center">
-                    <button
-                        onClick={toggleMode}
-                        disabled={isProcessing}
-                        className="text-sm text-pharmacy-gold-dark hover:underline disabled:text-gray-400 font-medium"
-                    >
-                        {isRegistering ? 'Already have an account? Sign in' : 'First time? Create your password'}
-                    </button>
-                </div>
+                {/* Hide the mode toggle when recovering password to keep the user focused on the task */}
+                {!isRecovering && (
+                    <div className="mt-6 text-center">
+                        <button
+                            type="button"
+                            onClick={toggleMode}
+                            disabled={isProcessing}
+                            className="text-sm text-pharmacy-gold-dark hover:underline disabled:text-gray-400 font-medium"
+                        >
+                            {isRegistering ? 'Already have an account? Sign in' : 'First time? Create your password'}
+                        </button>
+                    </div>
+                )}
             </div>
         </div>
     );
