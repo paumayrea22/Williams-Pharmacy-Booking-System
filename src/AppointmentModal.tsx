@@ -20,6 +20,7 @@ interface Availability {
     day_of_week: number;
     start_time: string;
     end_time: string;
+    room_number: number;
 }
 
 interface Appointment {
@@ -58,8 +59,6 @@ const extractNameAndNote = (fullName: string) => {
     };
 };
 
-// Reconstructs the list of selected HH:mm slots an existing appointment spans, using the
-// professional's consultation duration to know how many contiguous slots it occupies.
 const computeInitialTimes = (appointmentToEdit: Appointment | undefined | null, initialTime: string[] | undefined, professionals: Professional[]): string[] => {
     if (appointmentToEdit) {
         const oldStart = DateTime.fromISO(appointmentToEdit.start_time_utc, { zone: 'Europe/Malta' });
@@ -85,10 +84,8 @@ export default function AppointmentModal({
     const { role, username } = useAuth();
     const staffUsername = username ?? 'System';
 
-    // Identifies if the modal was opened by clicking a specific cell on the grid
     const isGridDeepLink = !!(initialDate && initialTime && initialTime.length > 0 && !appointmentToEdit);
 
-    // Doctors are always locked to their own professional record, regardless of what opened the modal
     const computeInitialProfessionalId = (): string => {
         if (role === 'doctor' && username) {
             const doctorName = username.split('-')[1];
@@ -133,8 +130,19 @@ export default function AppointmentModal({
         return initialDate ?? DateTime.local({ zone: 'Europe/Malta' });
     });
 
-    // Fallback to the first registered room until the pharmacist (or an edit/deep-link) picks one explicitly
     const effectiveRoomNumber = roomNumber || rooms[0]?.room_number.toString() || '';
+
+    const validationWarning = useMemo(() => {
+        if (isGridDeepLink && gridEligibleDoctors !== null && gridEligibleDoctors.length === 0) {
+            return 'No available professionals for this specific time slot.';
+        }
+        if (!clientName.trim()) return 'Patient Full Name is strictly required.';
+        if (clientPhone.replace(/\D/g, '').length < 8) return 'Mobile Number must contain at least 8 digits.';
+        if (!confirmedDate) return 'An Appointment Date must be selected.';
+        if (confirmedTime.length === 0) return 'An Appointment Time must be selected.';
+        if (!effectiveRoomNumber) return 'A Clinic Room must be assigned.';
+        return null;
+    }, [isGridDeepLink, gridEligibleDoctors, clientName, clientPhone, confirmedDate, confirmedTime, effectiveRoomNumber]);
 
     useEffect(() => {
         const fetchRooms = async () => {
@@ -144,7 +152,6 @@ export default function AppointmentModal({
         fetchRooms();
     }, []);
 
-    // Fast-tracks eligible doctors logic when opening from the grid to disable doctors that don't fit the slot
     useEffect(() => {
         if (!isGridDeepLink || !initialDate || !initialTime) return;
 
@@ -159,7 +166,7 @@ export default function AppointmentModal({
             const endOfDay = initialDate.endOf('day').toUTC().toISO();
 
             const [availRes, apptRes] = await Promise.all([
-                supabase.from('availabilities').select('professional_id, start_time, end_time').eq('day_of_week', sqlDay),
+                supabase.from('availabilities').select('professional_id, start_time, end_time, room_number').eq('day_of_week', sqlDay),
                 supabase.from('appointments').select('professional_id, start_time_utc, end_time_utc, status').gte('start_time_utc', startOfDay).lte('start_time_utc', endOfDay)
             ]);
 
@@ -174,7 +181,10 @@ export default function AppointmentModal({
                     const [eH, eM] = a.end_time.split(':').map(Number);
                     const startM = sH * 60 + sM;
                     const endM = eH * 60 + eM;
-                    return slotMins >= startM && slotMins < endM;
+                    
+                    const isTimeValid = slotMins >= startM && slotMins < endM;
+                    const isRoomValid = initialRoom ? a.room_number === parseInt(initialRoom) : true;
+                    return isTimeValid && isRoomValid;
                 });
 
                 if (!hasWorkingHours) return;
@@ -205,7 +215,7 @@ export default function AppointmentModal({
         };
 
         fetchEligibility();
-    }, [isGridDeepLink, initialDate, initialTime, professionals]);
+    }, [isGridDeepLink, initialDate, initialTime, professionals, initialRoom]);
 
     const isHolidayBlocked = (dateObj: DateTime): boolean => {
         if (dateObj.weekday === 7) return true; 
@@ -230,7 +240,7 @@ export default function AppointmentModal({
             if (!startOfMonth || !endOfMonth) return;
 
             const [availRes, apptRes] = await Promise.all([
-                supabase.from('availabilities').select('id, professional_id, day_of_week, start_time, end_time').eq('professional_id', modalProfessionalId),
+                supabase.from('availabilities').select('id, professional_id, day_of_week, start_time, end_time, room_number').eq('professional_id', modalProfessionalId),
                 supabase.from('appointments').select('id, professional_id, client_name, client_phone, start_time_utc, end_time_utc, status, room_number').eq('professional_id', modalProfessionalId)
                     .gte('start_time_utc', startOfMonth)
                     .lte('start_time_utc', endOfMonth)
@@ -242,7 +252,6 @@ export default function AppointmentModal({
         fetchMonthData();
     }, [modalProfessionalId, currentMonth]);
 
-    // Pure derivation from already-fetched state: no need for an effect + extra state round-trip
     const availableSlots = useMemo(() => {
         if (!confirmedDate || !modalProfessionalId) return [];
 
@@ -253,7 +262,7 @@ export default function AppointmentModal({
         const currentProfessional = professionals.find(p => p.id.toString() === modalProfessionalId);
         const duration = currentProfessional ? currentProfessional.default_duration_minutes : 15;
 
-        const generatedSlots: { time: string; isBooked: boolean }[] = [];
+        const generatedSlots: { time: string; isBooked: boolean; room_number: number }[] = [];
 
         dayAvails.forEach(avail => {
             let currentSlot = DateTime.fromISO(`${selectedDateString}T${avail.start_time}`, { zone: 'Europe/Malta' });
@@ -269,7 +278,7 @@ export default function AppointmentModal({
                     return appt.status !== 'cancelled' && currentSlot >= apptStart && currentSlot < apptEnd;
                 });
 
-                generatedSlots.push({ time: timeString, isBooked });
+                generatedSlots.push({ time: timeString, isBooked, room_number: avail.room_number });
                 currentSlot = currentSlot.plus({ minutes: duration });
             }
         });
@@ -293,10 +302,14 @@ export default function AppointmentModal({
         }
     };
 
-    const handleTimeSelection = (time: string) => {
+    const handleTimeSelection = (time: string, assignedRoom?: number) => {
+        if (assignedRoom) {
+            setRoomNumber(assignedRoom.toString());
+        }
+
         if (isGridDeepLink) {
             const baseTime = initialTime![0];
-            if (time === baseTime) return; // Core constraint: Cannot unselect the base slot
+            if (time === baseTime) return; 
             
             const currentProf = professionals.find(p => p.id.toString() === modalProfessionalId);
             const duration = currentProf ? currentProf.default_duration_minutes : 15;
@@ -304,7 +317,6 @@ export default function AppointmentModal({
             const time2 = DateTime.fromFormat(time, 'HH:mm');
             const diff = Math.abs(time1.diff(time2, 'minutes').minutes);
             
-            // Allow selecting only the immediate contiguous slot to expand duration
             if (diff === duration) {
                 if (tempTime.includes(time)) setTempTime([baseTime]);
                 else setTempTime([baseTime, time].sort());
@@ -344,8 +356,7 @@ export default function AppointmentModal({
         setErrorMessage('');
         setIsSubmitting(true);
 
-        if (!clientName.trim() || clientPhone.length < 8 || !confirmedDate || confirmedTime.length === 0 || !effectiveRoomNumber) {
-            setErrorMessage('All fields are required. Phone must be at least 8 digits.');
+        if (validationWarning !== null) {
             setIsSubmitting(false);
             return;
         }
@@ -353,7 +364,7 @@ export default function AppointmentModal({
         const currentProfessional = professionals.find(p => p.id.toString() === modalProfessionalId);
         const durationMinutes = currentProfessional ? currentProfessional.default_duration_minutes : 15;
 
-        const dateString = confirmedDate.toISODate();
+        const dateString = confirmedDate!.toISODate();
         const startDateTime = DateTime.fromISO(`${dateString}T${confirmedTime[0]}`, { zone: 'Europe/Malta' });
         const durationMultiplier = confirmedTime.length;
         const endDateTime = startDateTime.plus({ minutes: durationMinutes * durationMultiplier });
@@ -509,7 +520,6 @@ export default function AppointmentModal({
         );
     };
 
-    // Calculate conditional unlock for time expansion when using Deep Link
     const hasNote = appointmentNote.trim().length > 0;
     let hasNextSlotAvailable = false;
     if (isGridDeepLink && confirmedTime.length > 0 && availableSlots.length > 0) {
@@ -528,6 +538,7 @@ export default function AppointmentModal({
         }
     }
     const canEditTime = !isGridDeepLink || (hasNote && hasNextSlotAvailable);
+    const isRoomLockedBySchedule = confirmedTime.length > 0;
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-pharmacy-green/50 p-4 backdrop-blur-sm">
@@ -665,20 +676,28 @@ export default function AppointmentModal({
                         </div>
 
                         <div className="pt-1">
-                            <label className="block text-sm font-semibold text-pharmacy-ink mb-2">Assigned Clinic Room</label>
+                            <label className="block text-sm font-semibold text-pharmacy-ink mb-2 flex justify-between items-end">
+                                Assigned Clinic Room
+                                {isRoomLockedBySchedule && (
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-pharmacy-gold-dark bg-pharmacy-gold/10 px-2 py-0.5 rounded">
+                                        Locked by Schedule
+                                    </span>
+                                )}
+                            </label>
                             {rooms.length === 0 ? (
                                 <p className="text-xs text-pharmacy-muted">No clinic rooms registered. Add one in Staff Management first.</p>
                             ) : (
                                 <div className="flex items-center gap-6 flex-wrap">
                                     {rooms.map(room => (
-                                        <label key={room.id} className="flex items-center gap-2 cursor-pointer">
+                                        <label key={room.id} className={`flex items-center gap-2 ${isRoomLockedBySchedule ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
                                             <input
                                                 type="radio"
                                                 name="room"
                                                 value={room.room_number}
                                                 checked={effectiveRoomNumber === room.room_number.toString()}
                                                 onChange={(e) => setRoomNumber(e.target.value)}
-                                                className="w-4 h-4 text-pharmacy-gold-dark border-pharmacy-ink/30 focus:ring-pharmacy-gold"
+                                                disabled={isRoomLockedBySchedule}
+                                                className="w-4 h-4 text-pharmacy-gold-dark border-pharmacy-ink/30 focus:ring-pharmacy-gold disabled:bg-gray-200"
                                             />
                                             <span className="text-sm text-pharmacy-ink font-medium">{room.label}</span>
                                         </label>
@@ -687,17 +706,25 @@ export default function AppointmentModal({
                             )}
                         </div>
 
-                        <div className="mt-auto pt-4 border-t border-pharmacy-cream-dark flex justify-between items-center shrink-0">
-                            <button type="button" onClick={onClose} disabled={isSubmitting} className="text-sm font-semibold text-pharmacy-muted hover:text-pharmacy-ink transition">
-                                Cancel & Close
-                            </button>
-                            <button
-                                type="submit"
-                                disabled={isSubmitting || !clientName || clientPhone.length < 8 || !confirmedDate || confirmedTime.length === 0 || !effectiveRoomNumber || (isGridDeepLink && gridEligibleDoctors?.length === 0)}
-                                className="rounded-full bg-pharmacy-gold px-6 py-2.5 text-sm font-bold text-pharmacy-green shadow-md hover:bg-pharmacy-gold-dark hover:text-white disabled:bg-gray-300 disabled:text-white disabled:shadow-none transition-all"
-                            >
-                                {isSubmitting ? 'Saving...' : (appointmentToEdit ? 'Confirm Reschedule' : 'Confirm Appointment')}
-                            </button>
+                        <div className="mt-auto flex flex-col gap-3 pt-4 border-t border-pharmacy-cream-dark shrink-0">
+                            {validationWarning && (
+                                <p className="text-xs font-bold text-red-600 bg-red-50 p-2 rounded-lg border border-red-100/50 text-right flex justify-end items-center gap-1.5 animate-pulse shadow-sm">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                                    Action Blocked: {validationWarning}
+                                </p>
+                            )}
+                            <div className="flex justify-between items-center">
+                                <button type="button" onClick={onClose} disabled={isSubmitting} className="text-sm font-semibold text-pharmacy-muted hover:text-pharmacy-ink transition">
+                                    Cancel & Close
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={isSubmitting || validationWarning !== null}
+                                    className="rounded-full bg-pharmacy-gold px-6 py-2.5 text-sm font-bold text-pharmacy-green shadow-md hover:bg-pharmacy-gold-dark hover:text-white disabled:bg-gray-300 disabled:text-white disabled:shadow-none transition-all"
+                                >
+                                    {isSubmitting ? 'Saving...' : (appointmentToEdit ? 'Confirm Reschedule' : 'Confirm Appointment')}
+                                </button>
+                            </div>
                         </div>
                     </form>
                 </div>
@@ -750,7 +777,7 @@ export default function AppointmentModal({
                                                 const profDuration = professionals.find(p => p.id.toString() === modalProfessionalId)?.default_duration_minutes || 15;
                                                 const baseDT = DateTime.fromFormat(baseTimeStr, 'HH:mm');
                                                 const slotDT = DateTime.fromFormat(slot.time, 'HH:mm');
-                                                const diff = slotDT.diff(baseDT, 'minutes').minutes;
+                                                const diff = Math.abs(slotDT.diff(baseDT, 'minutes').minutes);
                                                 
                                                 if (slot.time !== baseTimeStr && diff !== profDuration) {
                                                     isClickable = false;
@@ -762,7 +789,7 @@ export default function AppointmentModal({
                                                     key={idx}
                                                     type="button"
                                                     disabled={slot.isBooked || !isClickable}
-                                                    onClick={() => handleTimeSelection(slot.time)}
+                                                    onClick={() => handleTimeSelection(slot.time, slot.room_number)}
                                                     className={`p-3 rounded-lg border-2 text-sm font-bold transition-all ${
                                                         slot.isBooked
                                                             ? 'bg-red-50 border-red-100 text-red-400 cursor-not-allowed line-through'

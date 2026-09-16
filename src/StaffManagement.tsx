@@ -16,6 +16,8 @@ interface Availability {
     day_of_week: number;
     start_time: string;
     end_time: string;
+    specific_date?: string | null;
+    room_number: number;
 }
 
 interface Room {
@@ -50,9 +52,12 @@ export default function StaffManagement() {
 
     // Schedule Configuration State
     const [selectedProfessional, setSelectedProfessional] = useState<string>('');
+    const [scheduleMode, setScheduleMode] = useState<'recurring' | 'specific'>('recurring');
     const [newDay, setNewDay] = useState('1'); 
+    const [specificDate, setSpecificDate] = useState('');
     const [startTime, setStartTime] = useState('08:00');
     const [endTime, setEndTime] = useState('14:00');
+    const [selectedRoomForSchedule, setSelectedRoomForSchedule] = useState<string>('');
 
     // Edit Professional State
     const [editProfessionalId, setEditProfessionalId] = useState<string>('');
@@ -96,8 +101,9 @@ export default function StaffManagement() {
         try {
             const { data, error } = await supabase
                 .from('availabilities')
-                .select('id, professional_id, day_of_week, start_time, end_time')
+                .select('id, professional_id, day_of_week, start_time, end_time, specific_date, room_number')
                 .eq('professional_id', selectedProfessional)
+                .order('specific_date', { ascending: false, nullsFirst: true })
                 .order('day_of_week', { ascending: true })
                 .order('start_time', { ascending: true });
 
@@ -120,7 +126,12 @@ export default function StaffManagement() {
             if (error) {
                 throw new Error(error.message);
             }
-            setRooms(data || []);
+            if (data) {
+                setRooms(data);
+                if (data.length > 0 && !selectedRoomForSchedule) {
+                    setSelectedRoomForSchedule(data[0].room_number.toString());
+                }
+            }
         } catch (error) {
             setErrorMessage('Infrastructure error loading rooms: ' + getErrorMessage(error));
         }
@@ -154,7 +165,6 @@ export default function StaffManagement() {
         fetchAvailabilities();
     }, [selectedProfessional]);
 
-    // Synchronize Edit State with Professionals Collection Lifecycle
     useEffect(() => {
         if (professionals.length > 0) {
             const currentSelected = professionals.find(p => p.id.toString() === editProfessionalId);
@@ -205,9 +215,7 @@ export default function StaffManagement() {
                     default_duration_minutes: finalDuration
                 });
 
-            if (error) {
-                throw new Error(error.message);
-            }
+            if (error) throw new Error(error.message);
 
             setNewName('');
             setNewSpecialty('');
@@ -232,8 +240,6 @@ export default function StaffManagement() {
 
         setIsLoading(true);
         try {
-            // Updating the root entity automatically propagates changes 
-            // across all relational SQL JOINs (appointments, history, etc.)
             const { error } = await supabase
                 .from('professionals')
                 .update({ 
@@ -242,9 +248,7 @@ export default function StaffManagement() {
                 })
                 .eq('id', parseInt(editProfessionalId));
 
-            if (error) {
-                throw new Error(error.message);
-            }
+            if (error) throw new Error(error.message);
 
             await fetchProfessionals();
         } catch (error) {
@@ -267,13 +271,8 @@ export default function StaffManagement() {
                 .eq('id', professionalId)
                 .select('id');
 
-            if (error) {
-                throw new Error(error.message);
-            }
-
-            if (!data || data.length === 0) {
-                throw new Error('Update blocked by database permissions.');
-            }
+            if (error) throw new Error(error.message);
+            if (!data || data.length === 0) throw new Error('Update blocked by database permissions.');
 
             await fetchProfessionals();
         } catch (error) {
@@ -284,8 +283,6 @@ export default function StaffManagement() {
         }
     };
 
-    // Removes a specialist. Appointments reference professionals with ON DELETE RESTRICT,
-    // so Postgres rejects this (code 23503) if the doctor has any appointment on record.
     const deleteProfessional = async (professionalId: number, fullName: string) => {
         const confirmation = window.confirm(`Are you strictly sure you want to permanently delete ${fullName}? This cannot be undone.`);
         if (!confirmation) return;
@@ -326,6 +323,23 @@ export default function StaffManagement() {
         setErrorMessage('');
         
         if (!selectedProfessional) return;
+        if (!selectedRoomForSchedule) {
+            setErrorMessage('Validation Error: A physical clinic room must be assigned to the shift.');
+            return;
+        }
+
+        let finalDayOfWeek = parseInt(newDay);
+        let finalSpecificDate = null;
+
+        if (scheduleMode === 'specific') {
+            if (!specificDate) {
+                setErrorMessage('Validation Error: Please select a valid specific date.');
+                return;
+            }
+            const dateObj = new Date(specificDate);
+            finalDayOfWeek = dateObj.getDay(); 
+            finalSpecificDate = specificDate;
+        }
 
         setIsLoading(true);
         try {
@@ -333,14 +347,14 @@ export default function StaffManagement() {
                 .from('availabilities')
                 .insert({
                     professional_id: parseInt(selectedProfessional),
-                    day_of_week: parseInt(newDay),
+                    day_of_week: finalDayOfWeek,
                     start_time: startTime + ':00',
-                    end_time: endTime + ':00'
+                    end_time: endTime + ':00',
+                    specific_date: finalSpecificDate,
+                    room_number: parseInt(selectedRoomForSchedule)
                 });
 
-            if (error) {
-                throw new Error(error.message);
-            }
+            if (error) throw new Error(error.message);
 
             await fetchAvailabilities();
         } catch (error) {
@@ -361,9 +375,7 @@ export default function StaffManagement() {
                 .delete()
                 .eq('id', scheduleId);
 
-            if (error) {
-                throw new Error(error.message);
-            }
+            if (error) throw new Error(error.message);
 
             await fetchAvailabilities();
         } catch (error) {
@@ -387,9 +399,7 @@ export default function StaffManagement() {
                 .from('rooms')
                 .insert({ room_number: nextRoomNumber, label });
 
-            if (error) {
-                throw new Error(error.message);
-            }
+            if (error) throw new Error(error.message);
 
             setNewRoomLabel('');
             await fetchRooms();
@@ -415,9 +425,7 @@ export default function StaffManagement() {
                 throw new Error(error.message);
             }
 
-            if (!data || data.length === 0) {
-                throw new Error('Delete blocked by database permissions.');
-            }
+            if (!data || data.length === 0) throw new Error('Delete blocked by database permissions.');
 
             await fetchRooms();
         } catch (error) {
@@ -487,7 +495,6 @@ export default function StaffManagement() {
                 </div>
             )}
 
-            {/* Zero Trust Authentication Whitelist (Admin Only) */}
             {role === 'pharmacist' && (
                 <div className="bg-white border border-red-200/60 p-5 rounded-xl shadow-sm flex flex-col gap-4 relative overflow-hidden shrink-0">
                     <div className="absolute top-0 left-0 w-1 h-full bg-red-600/80"></div>
@@ -558,9 +565,7 @@ export default function StaffManagement() {
                 </div>
             )}
 
-            {/* Upper Grid: Registration & Schedules */}
             <div className="grid gap-6 md:grid-cols-2 shrink-0">
-                {/* Specialist Registration Panel */}
                 <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4">
                     <h2 className="font-display text-lg text-pharmacy-ink border-b pb-2 border-pharmacy-cream-dark">Register New Doctor</h2>
                     <form onSubmit={createProfessional} className="flex flex-col gap-4">
@@ -666,7 +671,6 @@ export default function StaffManagement() {
                     </div>
                 </div>
 
-                {/* Dynamic Schedule Configuration Panel */}
                 <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4">
                     <h2 className="font-display text-lg text-pharmacy-ink border-b pb-2 border-pharmacy-cream-dark">Working Hours Configuration</h2>
 
@@ -683,32 +687,77 @@ export default function StaffManagement() {
                         </select>
                     </div>
 
-                    <form onSubmit={addAvailability} className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-pharmacy-cream p-3 rounded-lg border border-pharmacy-ink/10 items-end">
-                        <div>
-                            <label className="block text-xs font-bold text-pharmacy-muted mb-1">Day of Week</label>
-                            <select value={newDay} onChange={(e) => setNewDay(e.target.value)} className="w-full border border-pharmacy-ink/20 rounded p-1 text-xs bg-white focus:outline-none">
-                                <option value="1">Monday</option>
-                                <option value="2">Tuesday</option>
-                                <option value="3">Wednesday</option>
-                                <option value="4">Thursday</option>
-                                <option value="5">Friday</option>
-                                <option value="6">Saturday</option>
-                                <option value="0">Sunday</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-pharmacy-muted mb-1">Start Time</label>
-                            <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-full border border-pharmacy-ink/20 rounded p-1 text-xs bg-white focus:outline-none" />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-pharmacy-muted mb-1">End Time</label>
-                            <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-full border border-pharmacy-ink/20 rounded p-1 text-xs bg-white focus:outline-none" />
-                        </div>
-                        <div className="col-span-2 sm:col-span-1">
-                            <button type="submit" disabled={isLoading || !selectedProfessional} className="w-full bg-pharmacy-green text-white rounded p-1.5 text-xs font-bold hover:bg-pharmacy-green-light transition disabled:opacity-50">
-                                Add
+                    <form onSubmit={addAvailability} className="flex flex-col gap-3 bg-pharmacy-cream p-4 rounded-lg border border-pharmacy-ink/10">
+                        
+                        <div className="flex gap-2">
+                            <button 
+                                type="button" 
+                                onClick={() => setScheduleMode('recurring')} 
+                                className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${scheduleMode === 'recurring' ? 'bg-pharmacy-gold text-pharmacy-ink shadow-sm' : 'bg-transparent text-pharmacy-muted hover:bg-pharmacy-ink/5'}`}
+                            >
+                                Recurring Weekly
+                            </button>
+                            <button 
+                                type="button" 
+                                onClick={() => setScheduleMode('specific')} 
+                                className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${scheduleMode === 'specific' ? 'bg-pharmacy-gold text-pharmacy-ink shadow-sm' : 'bg-transparent text-pharmacy-muted hover:bg-pharmacy-ink/5'}`}
+                            >
+                                Specific Date
                             </button>
                         </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-end mt-1">
+                            {scheduleMode === 'recurring' ? (
+                                <div>
+                                    <label className="block text-xs font-bold text-pharmacy-muted mb-1">Day of Week</label>
+                                    <select value={newDay} onChange={(e) => setNewDay(e.target.value)} className="w-full border border-pharmacy-ink/20 rounded p-1.5 text-xs bg-white focus:outline-none">
+                                        <option value="1">Monday</option>
+                                        <option value="2">Tuesday</option>
+                                        <option value="3">Wednesday</option>
+                                        <option value="4">Thursday</option>
+                                        <option value="5">Friday</option>
+                                        <option value="6">Saturday</option>
+                                        <option value="0">Sunday</option>
+                                    </select>
+                                </div>
+                            ) : (
+                                <div>
+                                    <label className="block text-xs font-bold text-pharmacy-gold-dark mb-1">Exact Date</label>
+                                    <input 
+                                        type="date" 
+                                        value={specificDate} 
+                                        onChange={(e) => setSpecificDate(e.target.value)} 
+                                        className="w-full border border-pharmacy-gold/40 rounded p-1.5 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-pharmacy-gold" 
+                                    />
+                                </div>
+                            )}
+                            
+                            <div>
+                                <label className="block text-xs font-bold text-pharmacy-muted mb-1">Start Time</label>
+                                <input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} className="w-full border border-pharmacy-ink/20 rounded p-1.5 text-xs bg-white focus:outline-none" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-pharmacy-muted mb-1">End Time</label>
+                                <input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} className="w-full border border-pharmacy-ink/20 rounded p-1.5 text-xs bg-white focus:outline-none" />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-pharmacy-muted mb-1">Clinic Room</label>
+                                <select 
+                                    value={selectedRoomForSchedule} 
+                                    onChange={(e) => setSelectedRoomForSchedule(e.target.value)} 
+                                    className="w-full border border-pharmacy-ink/20 rounded p-1.5 text-xs bg-white focus:outline-none"
+                                >
+                                    {rooms.length === 0 && <option value="" disabled>No rooms</option>}
+                                    {rooms.map(r => (
+                                        <option key={r.id} value={r.room_number}>{r.label}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+
+                        <button type="submit" disabled={isLoading || !selectedProfessional} className="w-full mt-1 bg-pharmacy-green text-white rounded p-2 text-xs font-bold hover:bg-pharmacy-green-light transition disabled:opacity-50">
+                            {scheduleMode === 'recurring' ? 'Add Recurring Schedule' : 'Add Extraordinary Shift'}
+                        </button>
                     </form>
 
                     <div className="flex-1 min-h-0 overflow-y-auto border border-pharmacy-ink/10 rounded-lg custom-scrollbar">
@@ -717,11 +766,16 @@ export default function StaffManagement() {
                         ) : (
                             <ul className="divide-y divide-pharmacy-cream-dark">
                                 {availabilities.map(d => (
-                                    <li key={d.id} className="p-3 text-xs flex justify-between items-center hover:bg-pharmacy-cream">
-                                        <div>
-                                            <span className="font-bold text-pharmacy-ink mr-2">{DAYS_OF_WEEK[d.day_of_week]}</span>
-                                            <span className="text-pharmacy-muted bg-pharmacy-cream px-2 py-0.5 rounded font-mono">
+                                    <li key={d.id} className={`p-3 text-xs flex justify-between items-center hover:bg-pharmacy-cream ${d.specific_date ? 'bg-pharmacy-gold/5' : ''}`}>
+                                        <div className="flex items-center flex-wrap gap-2">
+                                            <span className={`font-bold ${d.specific_date ? 'text-pharmacy-gold-dark' : 'text-pharmacy-ink'}`}>
+                                                {d.specific_date ? `[ ${d.specific_date} ]` : DAYS_OF_WEEK[d.day_of_week]}
+                                            </span>
+                                            <span className="text-pharmacy-muted bg-white border border-pharmacy-ink/10 px-2 py-0.5 rounded font-mono">
                                                 {d.start_time.substring(0, 5)} - {d.end_time.substring(0, 5)}
+                                            </span>
+                                            <span className="text-[10px] font-bold uppercase tracking-wider text-pharmacy-gold-dark bg-pharmacy-gold/15 px-1.5 py-0.5 rounded">
+                                                Rm {d.room_number}
                                             </span>
                                         </div>
                                         <button
@@ -739,10 +793,7 @@ export default function StaffManagement() {
                 </div>
             </div>
 
-            {/* Lower Grid: Profile Editing & Clinic Rooms */}
             <div className="grid gap-6 md:grid-cols-2 shrink-0">
-                
-                {/* Doctor Profile Editing Panel */}
                 <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4">
                     <div className="border-b pb-2 border-pharmacy-cream-dark">
                         <h2 className="font-display text-lg text-pharmacy-ink">Edit Doctor Profile</h2>
@@ -797,7 +848,6 @@ export default function StaffManagement() {
                     </form>
                 </div>
 
-                {/* Clinic Room Management Panel */}
                 <div className="bg-white border border-pharmacy-ink/10 p-5 rounded-xl shadow-sm flex flex-col gap-4">
                     <div className="border-b pb-2 border-pharmacy-cream-dark">
                         <h2 className="font-display text-lg text-pharmacy-ink">Clinic Rooms</h2>
@@ -847,7 +897,6 @@ export default function StaffManagement() {
                         )}
                     </div>
                 </div>
-                
             </div>
         </div>
     );
