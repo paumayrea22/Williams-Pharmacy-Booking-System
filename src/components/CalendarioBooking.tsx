@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { DateTime } from 'luxon';
 import { getMaltaHolidayName } from '../holidays';
 
@@ -20,6 +20,8 @@ export default function CalendarioBooking({ weekStart, selectedDayIndex, allowAl
     const [isOpen, setIsOpen] = useState(false);
     const [visibleMonth, setVisibleMonth] = useState<DateTime>(() => weekStart.startOf('month'));
     const containerRef = useRef<HTMLDivElement>(null);
+    const triggerRef = useRef<HTMLButtonElement>(null);
+    const popoverRef = useRef<HTMLDivElement>(null);
 
     const selectedDate = selectedDayIndex === -1 ? null : weekStart.plus({ days: selectedDayIndex });
     const today = DateTime.local({ zone: MALTA_ZONE }).startOf('day');
@@ -37,6 +39,37 @@ export default function CalendarioBooking({ weekStart, selectedDayIndex, allowAl
         return () => {
             document.removeEventListener('mousedown', handlePointerDown);
             document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [isOpen]);
+
+    // The trigger sits near the right edge inside an overflow-auto panel, so an absolutely positioned popover
+    // got clipped on the right. Fixed positioning escapes that panel; clamping keeps it fully inside the viewport.
+    // Styles are written straight to the node (before paint) to avoid an extra render on every scroll/resize.
+    useLayoutEffect(() => {
+        if (!isOpen) return;
+        const place = () => {
+            const trigger = triggerRef.current;
+            const popover = popoverRef.current;
+            if (!trigger || !popover) return;
+
+            const gap = 8;
+            const edge = 8;
+            const t = trigger.getBoundingClientRect();
+            const p = popover.getBoundingClientRect();
+
+            const left = Math.max(edge, Math.min(t.left, window.innerWidth - p.width - edge));
+            const fitsBelow = t.bottom + gap + p.height <= window.innerHeight - edge;
+            const top = fitsBelow ? t.bottom + gap : Math.max(edge, t.top - gap - p.height);
+
+            popover.style.left = `${left}px`;
+            popover.style.top = `${top}px`;
+        };
+        place();
+        window.addEventListener('resize', place);
+        window.addEventListener('scroll', place, true);
+        return () => {
+            window.removeEventListener('resize', place);
+            window.removeEventListener('scroll', place, true);
         };
     }, [isOpen]);
 
@@ -61,6 +94,7 @@ export default function CalendarioBooking({ weekStart, selectedDayIndex, allowAl
     return (
         <div ref={containerRef} className="relative">
             <button
+                ref={triggerRef}
                 type="button"
                 onClick={toggleOpen}
                 aria-haspopup="dialog"
@@ -77,7 +111,7 @@ export default function CalendarioBooking({ weekStart, selectedDayIndex, allowAl
             </button>
 
             {isOpen && (
-                <div role="dialog" aria-label="Pick a date" className="absolute left-0 top-full z-30 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-xl border border-pharmacy-ink/10 bg-white p-4 shadow-xl">
+                <div ref={popoverRef} role="dialog" aria-label="Pick a date" className="fixed z-50 w-72 max-w-[calc(100vw-1rem)] rounded-xl border border-pharmacy-ink/10 bg-white p-4 shadow-xl">
                     <p className="border-b border-pharmacy-cream-dark pb-3 text-sm font-semibold text-pharmacy-ink">
                         {(selectedDate ?? today).toFormat('cccc, MMMM d')}
                     </p>
