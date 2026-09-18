@@ -9,7 +9,7 @@ Turno 1: El primero en subir (Iván)
 Bash
 git add .
 git commit -m "refactor: update codebase files"
-git pull origin main
+git pull origin main (:wq)
 git push origin main
 Turno 2: El que unifica y resuelve (Tú)
 

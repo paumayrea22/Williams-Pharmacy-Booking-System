@@ -11,11 +11,28 @@ if (!supabaseUrl || !supabaseKey) {
 
 const supabase = createClient(supabaseUrl, supabaseKey);
 
+// Raised by get_calendar_feed when the token is unknown or the doctor turned synchronization off
+const INVALID_TOKEN_SQLSTATE = '28000';
+
+interface FeedAppointment {
+    id: number;
+    client_name: string;
+    client_phone: string;
+    start_time_utc: string;
+    end_time_utc: string;
+    internal_notes: string | null;
+    room_number: number;
+}
+
 // Utility to enforce the strict ISO 8601 string format required by the iCalendar RFC 5545 specification
 const formatIcsDate = (isoString: string): string => {
     const date = new Date(isoString);
     return date.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
 };
+
+// RFC 5545 TEXT escaping: an unescaped comma or semicolon in a patient name or note corrupts the event for Google
+const escapeIcsText = (value: string): string =>
+    value.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     const token = req.query.token as string;
@@ -25,39 +42,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     try {
-        // 1. Validate the cryptographic token against the database whitelist
-        const { data: syncData, error: syncError } = await supabase
-            .from('calendar_sync_settings')
-            .select('professional_id, sync_enabled')
-            .eq('secure_token', token)
-            .single();
+        // Calendar apps call this endpoint without a Supabase session, so the query runs as anon.
+        // The SECURITY DEFINER function validates the token and scopes the rows to its owning professional.
+        const { data, error } = await supabase.rpc('get_calendar_feed', { p_token: token });
 
-        // 2. Halting execution if sync is disabled or token was revoked
         // Returning HTTP 403 Forbidden forces Apple/Google to halt synchronization gracefully
-        if (syncError || !syncData || !syncData.sync_enabled) {
+        if (error?.code === INVALID_TOKEN_SQLSTATE) {
             return res.status(403).send('Security Error: Calendar synchronization is currently disabled by the user or token revoked.');
         }
-
-        const professionalId = syncData.professional_id;
-
-        // Capture the exact current timestamp in strict UTC format
-        const nowUtc = new Date().toISOString();
-
-        // 3. Fetch valid appointments from the database
-        // Filtering strictly by end_time_utc to exclude any finished appointments from the HTTP request
-        const { data: appointments, error: apptError } = await supabase
-            .from('appointments')
-            .select('id, client_name, client_phone, start_time_utc, end_time_utc, internal_notes, room_number')
-            .eq('professional_id', professionalId)
-            .eq('status', 'confirmed')
-            .gte('end_time_utc', nowUtc)
-            .order('start_time_utc', { ascending: true });
-
-        if (apptError) {
-            throw apptError;
+        if (error) {
+            throw error;
         }
 
-        // 4. Construct the WebCal stream using the RFC 5545 protocol
+        const appointments = (data ?? []) as FeedAppointment[];
+
+        // Construct the WebCal stream using the RFC 5545 protocol
         const icsLines = [
             'BEGIN:VCALENDAR',
             'VERSION:2.0',
@@ -66,45 +65,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             'METHOD:PUBLISH',
             'X-WR-CALNAME:William Pharmacy Schedule',
             'X-WR-TIMEZONE:Europe/Malta',
-            'REFRESH-INTERVAL;VALUE=DURATION:PT15M'
+            'REFRESH-INTERVAL;VALUE=DURATION:PT15M',
+            'X-PUBLISHED-TTL:PT15M'
         ];
 
-        if (appointments && appointments.length > 0) {
-            // Generate the current DTSTAMP required by iCalendar standards
-            const now = formatIcsDate(nowUtc);
+        // Generate the current DTSTAMP required by iCalendar standards
+        const now = formatIcsDate(new Date().toISOString());
 
-            for (const appt of appointments) {
-                const dtStart = formatIcsDate(appt.start_time_utc);
-                const dtEnd = formatIcsDate(appt.end_time_utc);
-                
-                const summary = `Medical Appt: ${appt.client_name}`;
-                
-                // Escape commas and newlines per iCalendar specifications to prevent parsing failures
-                const description = `Patient: ${appt.client_name}\\nPhone: ${appt.client_phone}\\nRoom: ${appt.room_number}\\nNotes: ${appt.internal_notes || 'None'}`.replace(/,/g, '\\,');
+        for (const appt of appointments) {
+            const description = [
+                `Patient: ${appt.client_name}`,
+                `Phone: ${appt.client_phone}`,
+                `Room: ${appt.room_number}`,
+                `Notes: ${appt.internal_notes || 'None'}`
+            ].join('\n');
 
-                icsLines.push(
-                    'BEGIN:VEVENT',
-                    `UID:booking-${appt.id}@williams-pharmacy.com`,
-                    `DTSTAMP:${now}`,
-                    `DTSTART:${dtStart}`,
-                    `DTEND:${dtEnd}`,
-                    `SUMMARY:${summary}`,
-                    `DESCRIPTION:${description}`,
-                    `LOCATION:William Pharmacy\\, Clinic Room ${appt.room_number}`,
-                    'STATUS:CONFIRMED',
-                    'END:VEVENT'
-                );
-            }
+            icsLines.push(
+                'BEGIN:VEVENT',
+                `UID:booking-${appt.id}@williams-pharmacy.com`,
+                `DTSTAMP:${now}`,
+                `DTSTART:${formatIcsDate(appt.start_time_utc)}`,
+                `DTEND:${formatIcsDate(appt.end_time_utc)}`,
+                `SUMMARY:${escapeIcsText(`Medical Appt: ${appt.client_name}`)}`,
+                `DESCRIPTION:${escapeIcsText(description)}`,
+                `LOCATION:${escapeIcsText(`William Pharmacy, Clinic Room ${appt.room_number}`)}`,
+                'STATUS:CONFIRMED',
+                'END:VEVENT'
+            );
         }
 
         icsLines.push('END:VCALENDAR');
 
         const icsContent = icsLines.join('\r\n');
 
-        // 5. Inject HTTP Headers for safe delivery and Edge Caching
+        // Inject HTTP Headers for safe delivery and Edge Caching
         res.setHeader('Content-Type', 'text/calendar; charset=utf-8');
         res.setHeader('Content-Disposition', 'attachment; filename="pharmacy_schedule.ics"');
-        res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate'); 
+        res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate');
 
         return res.status(200).send(icsContent);
 

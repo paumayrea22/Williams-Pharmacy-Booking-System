@@ -40,6 +40,7 @@ export default function Layout() {
     const [syncGoogle, setSyncGoogle] = useState(false);
     const [syncApple, setSyncApple] = useState(false);
     const [syncToken, setSyncToken] = useState<string | null>(null);
+    const [feedUrlCopied, setFeedUrlCopied] = useState(false);
 
     const displayUsername = username ?? 'User';
     const displayRole = role ? role.toUpperCase() : 'STAFF';
@@ -183,6 +184,18 @@ export default function Layout() {
     // Dynamically generate the WebCal subscription URL stripping any residual protocols or extra slashes
     const hostname = window.location.host.replace(/^(https?:\/\/)?(www\.)?/, '').replace(/\/+$/, '');
     const generatedWebcalUrl = syncToken ? `webcal://${hostname}/api/calendar?token=${syncToken}` : '';
+    // Google's "cid" parameter opens the subscribe dialog directly, so doctors don't have to paste the URL by hand
+    const googleSubscribeUrl = generatedWebcalUrl ? `https://calendar.google.com/calendar/render?cid=${encodeURIComponent(generatedWebcalUrl)}` : '';
+
+    const handleCopyFeedUrl = async () => {
+        try {
+            await navigator.clipboard.writeText(generatedWebcalUrl);
+            setFeedUrlCopied(true);
+            setTimeout(() => setFeedUrlCopied(false), 2000);
+        } catch (error) {
+            console.error('Clipboard write failed:', error);
+        }
+    };
 
     return (
         <div className="relative flex h-screen w-screen bg-pharmacy-cream overflow-hidden font-sans">
@@ -274,6 +287,25 @@ export default function Layout() {
                                                 <div className="bg-white border border-emerald-200 rounded p-2 text-[10px] font-mono break-all text-gray-600 select-all cursor-text">
                                                     {generatedWebcalUrl}
                                                 </div>
+                                                <div className="flex flex-col sm:flex-row gap-2">
+                                                    {syncGoogle && (
+                                                        <a
+                                                            href={googleSubscribeUrl}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="flex-1 text-center bg-pharmacy-green text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-pharmacy-green-light transition shadow-sm"
+                                                        >
+                                                            Add to Google Calendar
+                                                        </a>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        onClick={handleCopyFeedUrl}
+                                                        className="flex-1 border border-emerald-300 bg-white text-emerald-800 px-4 py-2 rounded-lg text-xs font-bold hover:bg-emerald-100 transition"
+                                                    >
+                                                        {feedUrlCopied ? 'Copied!' : 'Copy link'}
+                                                    </button>
+                                                </div>
 
                                                 {syncApple && (
                                                     <div className="text-xs text-emerald-800 bg-emerald-100/50 p-2 rounded">
@@ -284,7 +316,7 @@ export default function Layout() {
                                                 {syncGoogle && (
                                                     <div className="text-xs text-emerald-800 bg-emerald-100/50 p-3 rounded flex flex-col gap-2">
                                                         <p>
-                                                            <span className="font-bold">Google:</span> Open Google Calendar on a PC &gt; Settings &gt; Add Calendar &gt; "From URL" &gt; Paste the link above.
+                                                            <span className="font-bold">Google:</span> Click "Add to Google Calendar" while signed in to the target account and confirm. If it doesn't open, go to Google Calendar on a PC &gt; Settings &gt; Add Calendar &gt; "From URL" &gt; paste the link above.
                                                         </p>
                                                         <div className="bg-amber-100 text-amber-900 p-2 rounded border border-amber-200">
                                                             <span className="font-bold flex items-center gap-1">
