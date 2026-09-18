@@ -45,6 +45,8 @@ interface Availability {
     day_of_week: number;
     start_time: string;
     end_time: string;
+    specific_date?: string | null;
+    room_number: number;
 }
 
 interface Appointment {
@@ -74,6 +76,7 @@ interface SlotDetails {
     status: 'Booked' | 'Available' | 'Unavailable' | 'Holiday';
     appointment?: Appointment;
     label?: string;
+    roomNumber?: number;
 }
 
 const DAYS_OF_WEEK = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -86,7 +89,6 @@ const extractNameAndNote = (fullName: string) => {
     };
 };
 
-// Starts precisely at 07:30
 const MORNING_SLOTS: { hour: number; minute: number }[] = [];
 for (let hour = 7; hour < 14; hour++) {
     for (const minute of [0, 15, 30, 45]) {
@@ -95,7 +97,6 @@ for (let hour = 7; hour < 14; hour++) {
     }
 }
 
-// Afternoon slots restricted to close precisely at 19:30 (last slot is 19:15)
 const AFTERNOON_SLOTS: { hour: number; minute: number }[] = [];
 for (let hour = 14; hour <= 19; hour++) {
     for (const minute of [0, 15, 30, 45]) {
@@ -106,7 +107,6 @@ for (let hour = 14; hour <= 19; hour++) {
 
 const FULL_DAY_SLOTS: { hour: number; minute: number }[] = [...MORNING_SLOTS, ...AFTERNOON_SLOTS];
 
-// Builds continuous slots honoring duration and enforcing the 19:30 hard cutoff
 const buildTimeSlots = (startHour: number, endHour: number, stepMinutes: number): { hour: number; minute: number }[] => {
     const slots: { hour: number; minute: number }[] = [];
     let startMin = startHour * 60;
@@ -230,7 +230,7 @@ export default function Calendar() {
             const startUtc = currentWeekStart.startOf('week').toUTC().toISO();
             const endUtc = currentWeekStart.endOf('week').toUTC().toISO();
 
-            let availQuery = supabase.from('availabilities').select('id, professional_id, day_of_week, start_time, end_time');
+            let availQuery = supabase.from('availabilities').select('id, professional_id, day_of_week, start_time, end_time, specific_date, room_number');
             let apptQuery = supabase.from('appointments')
                 .select('id, professional_id, client_name, client_phone, start_time_utc, end_time_utc, status, room_number')
                 .gte('start_time_utc', startUtc)
@@ -339,10 +339,11 @@ export default function Calendar() {
     const getSlotDetails = (dayIndex: number, hour: number, minute: number, targetRoom?: number): SlotDetails => {
         const slotDate = currentWeekStart.plus({ days: dayIndex }).set({ hour, minute });
         const sqlDayIndex = slotDate.weekday === 7 ? 0 : slotDate.weekday;
+        const formattedSlotDate = slotDate.toISODate();
 
         if (slotDate.weekday === 7) return { status: 'Holiday', label: 'Sunday (Closed)' };
 
-        const holidayName = getMaltaHolidayName(slotDate.toISODate()!);
+        const holidayName = getMaltaHolidayName(formattedSlotDate!);
         if (holidayName) return { status: 'Holiday', label: holidayName };
 
         const bookedAppt = appointments.find(appt => {
@@ -355,15 +356,25 @@ export default function Calendar() {
         if (bookedAppt) return { status: 'Booked', appointment: bookedAppt };
 
         const slotMinutes = hour * 60 + minute;
-        const isAvailable = availabilities.some(avail => {
+        
+        // Priority checks: Specific Dates first, then generic recurring days.
+        const matchedAvail = availabilities.find(avail => {
             const [startHour, startMinute] = avail.start_time.split(':').map(Number);
             const [endHour, endMinute] = avail.end_time.split(':').map(Number);
             const startMins = startHour * 60 + startMinute;
             const endMins = endHour * 60 + endMinute;
-            return avail.day_of_week === sqlDayIndex && slotMinutes >= startMins && slotMinutes < endMins;
+            
+            if (slotMinutes < startMins || slotMinutes >= endMins) return false;
+            if (targetRoom !== undefined && avail.room_number !== targetRoom) return false; // Strict physical space filtering
+
+            if (avail.specific_date) {
+                return avail.specific_date === formattedSlotDate;
+            } else {
+                return avail.day_of_week === sqlDayIndex;
+            }
         });
 
-        if (isAvailable) return { status: 'Available' };
+        if (matchedAvail) return { status: 'Available', roomNumber: matchedAvail.room_number };
         return { status: 'Unavailable' };
     };
 
@@ -440,7 +451,10 @@ export default function Calendar() {
     const activeFilteredAppts = filteredAppointments.filter(a => a.status !== 'cancelled');
     const uniqueTimesForGeneral = Array.from(new Set(activeFilteredAppts.map(a => a.start_time_utc))).sort();
 
-    const groupedAvailabilities = availabilities.reduce((acc, curr) => {
+    const recurringAvailabilities = availabilities.filter(a => !a.specific_date);
+    const extraordinaryShifts = availabilities.filter(a => a.specific_date);
+
+    const groupedAvailabilities = recurringAvailabilities.reduce((acc, curr) => {
         if (!acc[curr.day_of_week]) acc[curr.day_of_week] = [];
         acc[curr.day_of_week].push(curr);
         return acc;
@@ -679,8 +693,43 @@ export default function Calendar() {
                             ) : (
                                 <div className="flex flex-col md:flex-row gap-8 pb-8">
                                     <div className="flex-1 md:border-r border-dashed border-pharmacy-ink/20 md:pr-8">
+                                        
+                                        {/* Extraordinary Shifts Rendering */}
+                                        {extraordinaryShifts.length > 0 && (
+                                            <div className="mb-6 bg-pharmacy-gold/10 p-4 rounded-xl border border-pharmacy-gold/30">
+                                                <h3 className="font-display text-lg text-pharmacy-gold-dark mb-3 flex items-center gap-2">
+                                                    Extraordinary Shifts
+                                                </h3>
+                                                <div className="flex flex-col gap-3">
+                                                    {extraordinaryShifts.map((avail) => {
+                                                        const dateObj = DateTime.fromISO(avail.specific_date!);
+                                                        const isMorning = parseInt(avail.start_time.split(':')[0], 10) < 14;
+                                                        return (
+                                                            <div key={avail.id} className="flex items-center justify-between bg-white p-2.5 rounded shadow-sm border border-pharmacy-ink/10">
+                                                                <div>
+                                                                    <span className="font-bold text-pharmacy-ink text-sm block">{dateObj.toFormat('dd/MM/yyyy')}</span>
+                                                                    <span className={`text-[10px] font-bold uppercase tracking-[0.15em] ${isMorning ? 'text-emerald-600' : 'text-pharmacy-gold-dark'}`}>
+                                                                        {isMorning ? 'Morning' : 'Afternoon'}
+                                                                    </span>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <span className="text-[10px] font-bold uppercase text-pharmacy-ink bg-pharmacy-cream border border-pharmacy-ink/10 px-1.5 py-0.5 rounded">
+                                                                        Rm {avail.room_number}
+                                                                    </span>
+                                                                    <span className="text-sm font-medium text-pharmacy-ink font-mono bg-pharmacy-cream px-2 py-1 rounded">
+                                                                        {formatTime(avail.start_time)} - {formatTime(avail.end_time)}
+                                                                    </span>
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        {/* Standard Recurring Schedule Rendering */}
                                         {Object.keys(groupedAvailabilities).length === 0 ? (
-                                            <p className="text-sm text-pharmacy-muted">No schedules configured for this professional.</p>
+                                            <p className="text-sm text-pharmacy-muted">No recurring schedules configured.</p>
                                         ) : (
                                             <div className="space-y-6">
                                                 {Object.keys(groupedAvailabilities).map(Number).sort().filter(sqlDay => {
@@ -700,6 +749,9 @@ export default function Calendar() {
                                                                         <div key={avail.id} className="flex items-center">
                                                                             <span className={`w-24 text-[10px] font-bold uppercase tracking-[0.15em] ${isMorning ? 'text-emerald-600' : 'text-pharmacy-gold-dark'}`}>
                                                                                 {isMorning ? 'Morning' : 'Afternoon'}
+                                                                            </span>
+                                                                            <span className="text-[10px] font-bold uppercase text-pharmacy-ink bg-white border border-pharmacy-ink/10 px-1.5 py-0.5 rounded mr-2">
+                                                                                Rm {avail.room_number}
                                                                             </span>
                                                                             <span className="text-sm font-medium text-pharmacy-ink">
                                                                                 {formatTime(avail.start_time)} - {formatTime(avail.end_time)}
@@ -860,7 +912,7 @@ export default function Calendar() {
                                                                     cellClass = 'bg-white border-emerald-100 text-emerald-700 hover:bg-pharmacy-gold/15 cursor-pointer';
                                                                     interactionProps = { 
                                                                         className: `border-b px-2 py-0 transition-colors text-xs ${cellClass}`,
-                                                                        onClick: () => handleEmptySlotClick(currentDate, timeString)
+                                                                        onClick: () => handleEmptySlotClick(currentDate, timeString, details.roomNumber?.toString())
                                                                     };
                                                                 } else {
                                                                     cellClass = 'bg-pharmacy-cream border-pharmacy-ink/5 text-pharmacy-muted';
