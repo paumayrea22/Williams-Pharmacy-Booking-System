@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from './lib/supabase';
 import { DateTime } from 'luxon';
 import AppointmentModal from './AppointmentModal';
+import CalendarioBooking from './components/CalendarioBooking';
 import { useAuth } from './context/AuthContext';
 import { getMaltaHolidayName } from './holidays';
 import { getErrorMessage } from './lib/errors';
@@ -627,21 +628,16 @@ export default function Calendar() {
                             <div className="flex flex-wrap items-center gap-4 text-sm font-medium">
                                 <div className="flex items-center gap-2 mr-2">
                                     <label className="text-sm font-medium text-pharmacy-muted">Day:</label>
-                                    <select
-                                        value={selectedDayIndex}
-                                        onChange={(e) => setSelectedDayIndex(Number(e.target.value))}
-                                        className="rounded-full border border-pharmacy-ink/20 bg-white px-3 py-1.5 text-sm font-medium text-pharmacy-ink shadow-sm focus:border-pharmacy-gold focus:outline-none"
-                                    >
-                                        {viewMode === 'list' && <option value={-1}>All Week</option>}
-                                        {DAYS_OF_WEEK.map((day, idx) => {
-                                            const date = currentWeekStart.plus({ days: idx });
-                                            return (
-                                                <option key={idx} value={idx}>
-                                                    {day} ({date.toFormat('dd/MM')})
-                                                </option>
-                                            );
-                                        })}
-                                    </select>
+                                    <CalendarioBooking
+                                        weekStart={currentWeekStart}
+                                        selectedDayIndex={selectedDayIndex}
+                                        allowAllWeek={viewMode === 'list'}
+                                        onSelectDate={(date) => {
+                                            setCurrentWeekStart(date.startOf('week'));
+                                            setSelectedDayIndex(date.weekday - 1);
+                                        }}
+                                        onSelectAllWeek={() => setSelectedDayIndex(-1)}
+                                    />
                                 </div>
                                 <button
                                     onClick={() => handleViewModeChange('list')}
